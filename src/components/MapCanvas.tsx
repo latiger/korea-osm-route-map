@@ -30,7 +30,7 @@ export const SEOUL_CENTER: LatLng = { lat: 37.5665, lng: 126.978 }
 export const DEFAULT_ZOOM = 12
 
 const ROUTE_STYLE = { color: '#2563eb', weight: 5, opacity: 0.85 }
-const FOCUS_ZOOM = 14.5
+const FOCUS_ZOOM = 18
 
 const waypointIcon = (n: number) =>
   L.divIcon({
@@ -43,9 +43,12 @@ const waypointIcon = (n: number) =>
 function FitBounds({
   points,
   route,
+  fitRevision = 0,
 }: {
   points: LatLng[]
   route: LatLng[]
+  /** Bump to re-run fitBounds (e.g. restore full route after step focus) */
+  fitRevision?: number
 }) {
   const map = useMap()
   // Content key so new array refs on focus re-renders do not re-fit (and undo FlyTo)
@@ -62,8 +65,8 @@ function FitBounds({
     }
     const bounds = L.latLngBounds(all.map((p) => [p.lat, p.lng] as [number, number]))
     map.fitBounds(bounds, { padding: [48, 48], maxZoom: 16 })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- points/route via key
-  }, [map, key])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- points/route via key; fitRevision forces re-fit
+  }, [map, key, fitRevision])
   return null
 }
 
@@ -113,6 +116,8 @@ export interface MapCanvasProps {
   onMapClick?: (ll: LatLng) => void
   /** Pan/zoom target from route-step click */
   focus?: LatLng | null
+  /** Bump to re-run FitBounds (restore full-route view) */
+  fitRevision?: number
 }
 
 export function MapCanvas({
@@ -123,6 +128,7 @@ export function MapCanvas({
   clickToAddWaypoints = false,
   onMapClick,
   focus = null,
+  fitRevision = 0,
 }: MapCanvasProps) {
   const [highlight, setHighlight] = useState<LatLng | null>(null)
 
@@ -157,7 +163,7 @@ export function MapCanvas({
         enabled={clickToAddWaypoints}
         onClick={(ll) => onMapClick?.(ll)}
       />
-      <FitBounds points={fitPoints} route={fitRoute} />
+      <FitBounds points={fitPoints} route={fitRoute} fitRevision={fitRevision} />
       <FlyTo focus={focus} onFlew={setHighlight} />
       {markers.map((m) => (
         <Marker key={m.key} position={[m.lat, m.lng]} title={m.label} />

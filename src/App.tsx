@@ -17,6 +17,7 @@ function App() {
   const [waypoints, setWaypoints] = useState<LatLng[]>([])
   const [route, setRoute] = useState<RouteResult | null>(null)
   const [focusLocation, setFocusLocation] = useState<LatLng | null>(null)
+  const [fitRevision, setFitRevision] = useState(0)
 
   const onMarkersChange = useCallback(
     (m: Array<LatLng & { key: string; label?: string }>) => setMarkers(m),
@@ -26,6 +27,11 @@ function App() {
   const onFocusLocation = useCallback((ll: LatLng) => {
     // New object so re-clicking the same step still triggers FlyTo
     setFocusLocation({ lat: ll.lat, lng: ll.lng })
+  }, [])
+
+  const showFullRoute = useCallback(() => {
+    setFocusLocation(null)
+    setFitRevision((n) => n + 1)
   }, [])
 
   function handleModeChange(m: AppMode) {
@@ -92,7 +98,17 @@ function App() {
               setWaypoints((prev) => [...prev, ll])
             }}
             focus={focusLocation}
+            fitRevision={fitRevision}
           />
+          {focusLocation != null && (
+            <button
+              type="button"
+              className="show-full-route"
+              onClick={showFullRoute}
+            >
+              전체경로보기
+            </button>
+          )}
         </main>
       </div>
     </div>

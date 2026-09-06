@@ -64,7 +64,7 @@ async function materializeRoad(
   profile: TravelProfile,
   signal?: AbortSignal,
 ): Promise<MaterializedRoad> {
-  const official = routeFromOfficialGeometry(match)
+  const official = await routeFromOfficialGeometry(match, signal)
   if (official) {
     return {
       match,

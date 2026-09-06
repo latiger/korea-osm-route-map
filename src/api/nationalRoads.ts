@@ -1,5 +1,6 @@
 import type { LatLng, RoadMatch, RouteResult, RouteStep } from '../types'
 import { parseRoadQuery } from './overpass'
+import { fetchRoute } from './route'
 
 export interface NationalRoadIndexEntry {
   routeNo: string
@@ -38,10 +39,18 @@ interface NationalRoadDetail extends NationalRoadIndexEntry {
 const MAX_OFFICIAL_STEPS = 40
 /** Merge consecutive segments shorter than this into one step label */
 const TINY_SEGMENT_M = 500
-/** Bridge visual gaps larger than this between ordered official segments */
-const GAP_BRIDGE_M = 90
+/** Gaps at or below this are ignored (negligible visual / distance) */
+const GAP_IGNORE_M = 90
+/** Route mid-size gaps up to this length; longer gaps are skipped */
+const GAP_ROUTE_MAX_M = 5000
+/** Max Kakao/OSRM connector calls per official road */
+const MAX_ROUTED_CONNECTORS = 15
+/** Parallel fetchRoute pool size for connectors */
+const ROUTE_CONCURRENCY = 5
 /** Connector steps shorter than this are merged / omitted from the step list */
 const TINY_CONNECTOR_STEP_M = 500
+/** Legacy alias used by tiny-step summary threshold */
+const GAP_BRIDGE_M = GAP_IGNORE_M
 
 let indexCache: NationalRoadIndex | null = null
 let indexPromise: Promise<NationalRoadIndex | null> | null = null
@@ -162,35 +171,139 @@ export function orderAndOrientSegments(
   return ordered
 }
 
+interface GapCandidate {
+  index: number
+  a: LatLng
+  b: LatLng
+  gapMeters: number
+}
+
+function geometryFromRouteResult(route: RouteResult): LatLng[] | null {
+  if (route.trafficSegments?.length) {
+    const coords: LatLng[] = []
+    for (const seg of route.trafficSegments) {
+      if (seg.coordinates.length >= 2) coords.push(...seg.coordinates)
+    }
+    if (coords.length >= 2) return coords
+  }
+  if (route.lineStrings?.length) {
+    const coords: LatLng[] = []
+    for (const line of route.lineStrings) {
+      if (line.length >= 2) coords.push(...line)
+    }
+    if (coords.length >= 2) return coords
+  }
+  if (route.coordinates && route.coordinates.length >= 2) {
+    return route.coordinates
+  }
+  return null
+}
+
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let next = 0
+  const workers = Array.from(
+    { length: Math.min(concurrency, Math.max(items.length, 1)) },
+    async () => {
+      while (true) {
+        const i = next++
+        if (i >= items.length) return
+        results[i] = await fn(items[i])
+      }
+    },
+  )
+  await Promise.all(workers)
+  return results
+}
+
 /**
- * Between consecutive oriented segments, insert a straight connector when the
- * gap exceeds GAP_BRIDGE_M. Official parts stay in `lineStrings`; bridges go
- * to `connectorLineStrings` for dashed styling.
+ * Between consecutive oriented segments:
+ * - ≤ ~90m: ignore
+ * - 90m … 5km: prefer Kakao/OSRM via fetchRoute (capped, shortest-first)
+ * - > 5km: skip (no connector — avoids bogus long jumps / distance bloat)
+ * Remaining mid-size gaps after the API cap fall back to short straight dashes.
+ * Official parts stay in `lineStrings`; bridges go to `connectorLineStrings`.
  */
-export function bridgeSegmentGaps(ordered: LatLng[][]): {
+export async function bridgeSegmentGaps(
+  ordered: LatLng[][],
+  signal?: AbortSignal,
+): Promise<{
   lineStrings: LatLng[][]
   connectorLineStrings: LatLng[][]
   connectorMeters: number
-} {
-  const connectorLineStrings: LatLng[][] = []
+  routedConnectorCount: number
+}> {
+  const connectorByGap = new Map<number, LatLng[]>()
   let connectorMeters = 0
+  let routedConnectorCount = 0
 
+  const candidates: GapCandidate[] = []
   for (let i = 1; i < ordered.length; i++) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     const prev = ordered[i - 1]
     const next = ordered[i]
-    const end = prev[prev.length - 1]
-    const start = next[0]
-    const gap = haversineMeters(end, start)
-    if (gap > GAP_BRIDGE_M) {
-      connectorLineStrings.push([end, start])
-      connectorMeters += gap
-    }
+    const a = prev[prev.length - 1]
+    const b = next[0]
+    const gapMeters = haversineMeters(a, b)
+    if (gapMeters <= GAP_IGNORE_M) continue
+    if (gapMeters > GAP_ROUTE_MAX_M) continue // prefer skip for long gaps
+    candidates.push({ index: i, a, b, gapMeters })
   }
+
+  // Shortest-first until cap so many small holes get real routes
+  const sorted = [...candidates].sort((x, y) => x.gapMeters - y.gapMeters)
+  const toRoute = sorted.slice(0, MAX_ROUTED_CONNECTORS)
+  const routedIndexes = new Set(toRoute.map((g) => g.index))
+
+  const routed = await mapPool(toRoute, ROUTE_CONCURRENCY, async (gap) => {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    try {
+      const route = await fetchRoute([gap.a, gap.b], 'driving', signal)
+      const geom = geometryFromRouteResult(route)
+      if (geom && geom.length >= 2) {
+        const meters =
+          route.distanceMeters > 0 ? route.distanceMeters : pathLengthMeters(geom)
+        return { index: gap.index, line: geom, meters, ok: true as const }
+      }
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') throw e
+      console.warn('[nationalRoads] connector route failed, using straight:', e)
+    }
+    // Failed route → straight dashed for this mid-size gap
+    return {
+      index: gap.index,
+      line: [gap.a, gap.b],
+      meters: gap.gapMeters,
+      ok: false as const,
+    }
+  })
+
+  for (const r of routed) {
+    connectorByGap.set(r.index, r.line)
+    connectorMeters += r.meters
+    if (r.ok) routedConnectorCount += 1
+  }
+
+  // Remaining mid-size gaps (over API cap): short straight dashed
+  for (const gap of candidates) {
+    if (routedIndexes.has(gap.index)) continue
+    connectorByGap.set(gap.index, [gap.a, gap.b])
+    connectorMeters += gap.gapMeters
+  }
+
+  const connectorLineStrings = [...connectorByGap.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, line]) => line)
 
   return {
     lineStrings: ordered,
     connectorLineStrings,
     connectorMeters,
+    routedConnectorCount,
   }
 }
 
@@ -422,11 +535,15 @@ export async function searchNationalRoads(
 }
 
 /**
- * Build a RouteResult from official MultiLineString geometry (no OSRM).
- * Orders/orients segments, bridges visual gaps with straight connectors
- * (dashed on the map). coordinates = longest official line (markers/fallback).
+ * Build a RouteResult from official MultiLineString geometry.
+ * Orders/orients segments; bridges mid-size gaps with capped Kakao/OSRM
+ * connectors (dashed on the map). Long gaps (>5km) are left open.
+ * coordinates = longest official line (markers/fallback).
  */
-export function routeFromOfficialGeometry(match: RoadMatch): RouteResult | null {
+export async function routeFromOfficialGeometry(
+  match: RoadMatch,
+  signal?: AbortSignal,
+): Promise<RouteResult | null> {
   const raw =
     match.lineStrings?.filter((l) => l.length >= 2) ??
     (match.geometry && match.geometry.length >= 2 ? [match.geometry] : [])
@@ -435,7 +552,7 @@ export function routeFromOfficialGeometry(match: RoadMatch): RouteResult | null 
 
   const ordered = orderAndOrientSegments(raw, match.start)
   const { lineStrings, connectorLineStrings, connectorMeters } =
-    bridgeSegmentGaps(ordered)
+    await bridgeSegmentGaps(ordered, signal)
 
   const officialMeters =
     match.lengthMeters ??

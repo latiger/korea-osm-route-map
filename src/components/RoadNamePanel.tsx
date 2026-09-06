@@ -162,7 +162,7 @@ export function RoadNamePanel({
           if (molit.length > 0) {
             setMatches(molit)
             setDataNote(
-              '국토교통부 일반국도 도로중심선(공식) geometry를 사용합니다. OSRM은 대체 경로용입니다.',
+              '국토교통부 일반국도 도로중심선(공식) geometry를 사용합니다. 구간 사이 짧은 끊김은 길찾기(카카오/OSRM, 상한 있음)로 잇고, 긴 간격은 비워 둡니다.',
             )
             if (molit.length === 1 && chainWasEmpty) {
               await applyChain([molit[0]])

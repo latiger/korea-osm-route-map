@@ -4,13 +4,14 @@ import {
   formatDuration,
   maneuverSymbol,
 } from '../api/osrm'
-import type { RouteResult } from '../types'
+import type { LatLng, RouteResult } from '../types'
 
 interface Props {
   route: RouteResult | null
+  onStepClick?: (ll: LatLng) => void
 }
 
-export function RouteSummary({ route }: Props) {
+export function RouteSummary({ route, onStepClick }: Props) {
   const [open, setOpen] = useState(true)
 
   if (!route) return null
@@ -62,12 +63,11 @@ export function RouteSummary({ route }: Props) {
                 ? formatDuration(step.durationSeconds)
                 : null
             const meta = [dist, dur].filter(Boolean).join(' · ')
+            const loc = step.location
+            const clickable = Boolean(loc && onStepClick)
 
-            return (
-              <li
-                key={`${i}-${step.type}-${step.name}`}
-                className="route-step"
-              >
+            const body = (
+              <>
                 <span className="route-step-symbol" aria-hidden>
                   {symbol}
                 </span>
@@ -81,6 +81,25 @@ export function RouteSummary({ route }: Props) {
                     <span className="route-step-meta">{meta}</span>
                   ) : null}
                 </div>
+              </>
+            )
+
+            return (
+              <li
+                key={`${i}-${step.type}-${step.name}`}
+                className="route-step"
+              >
+                {clickable && loc ? (
+                  <button
+                    type="button"
+                    className="route-step-button"
+                    onClick={() => onStepClick?.(loc)}
+                  >
+                    {body}
+                  </button>
+                ) : (
+                  body
+                )}
               </li>
             )
           })}

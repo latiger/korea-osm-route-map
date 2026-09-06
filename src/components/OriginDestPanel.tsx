@@ -11,6 +11,7 @@ interface Props {
   onProfileChange: (p: TravelProfile) => void
   onMarkersChange: (markers: Array<LatLng & { key: string; label?: string }>) => void
   onRouteChange: (route: RouteResult | null) => void
+  onFocusLocation?: (ll: LatLng) => void
 }
 
 const AMBIGUOUS_HINT = '동명이 여러 곳입니다. 목록에서 선택해 주세요.'
@@ -20,6 +21,7 @@ export function OriginDestPanel({
   onProfileChange,
   onMarkersChange,
   onRouteChange,
+  onFocusLocation,
 }: Props) {
   const [originText, setOriginText] = useState('서울역')
   const [destText, setDestText] = useState('광화문')
@@ -266,7 +268,7 @@ export function OriginDestPanel({
         </button>
       </form>
       {error && <p className="error">{error}</p>}
-      <RouteSummary route={route} />
+      <RouteSummary route={route} onStepClick={onFocusLocation} />
     </div>
   )
 }

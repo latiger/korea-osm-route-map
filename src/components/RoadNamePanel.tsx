@@ -17,6 +17,7 @@ interface Props {
   onProfileChange: (p: TravelProfile) => void
   onMarkersChange: (markers: Array<LatLng & { key: string; label?: string }>) => void
   onRouteChange: (route: RouteResult | null) => void
+  onFocusLocation?: (ll: LatLng) => void
 }
 
 export function RoadNamePanel({
@@ -24,6 +25,7 @@ export function RoadNamePanel({
   onProfileChange,
   onMarkersChange,
   onRouteChange,
+  onFocusLocation,
 }: Props) {
   const [roadText, setRoadText] = useState('2번국도')
   const [matches, setMatches] = useState<RoadMatch[]>([])
@@ -251,7 +253,7 @@ export function RoadNamePanel({
       )}
       {error && <p className="error">{error}</p>}
       {dataNote && <p className="hint">{dataNote}</p>}
-      <RouteSummary route={route} />
+      <RouteSummary route={route} onStepClick={onFocusLocation} />
       <p className="hint muted">
         국도(예: 2번국도)는 국토교통부 일반국도 도로중심선 공식 데이터를 우선하고,
         고속도로는 EX 노선 목록(이름/번호) + OSM Overpass geometry를 사용합니다.

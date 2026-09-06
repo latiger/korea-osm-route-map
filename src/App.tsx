@@ -16,17 +16,23 @@ function App() {
   >([])
   const [waypoints, setWaypoints] = useState<LatLng[]>([])
   const [route, setRoute] = useState<RouteResult | null>(null)
+  const [focusLocation, setFocusLocation] = useState<LatLng | null>(null)
 
   const onMarkersChange = useCallback(
     (m: Array<LatLng & { key: string; label?: string }>) => setMarkers(m),
     [],
   )
   const onRouteChange = useCallback((r: RouteResult | null) => setRoute(r), [])
+  const onFocusLocation = useCallback((ll: LatLng) => {
+    // New object so re-clicking the same step still triggers FlyTo
+    setFocusLocation({ lat: ll.lat, lng: ll.lng })
+  }, [])
 
   function handleModeChange(m: AppMode) {
     setMode(m)
     setMarkers([])
     setRoute(null)
+    setFocusLocation(null)
     if (m !== 'waypoints') setWaypoints([])
   }
 
@@ -50,6 +56,7 @@ function App() {
               onProfileChange={setProfile}
               onMarkersChange={onMarkersChange}
               onRouteChange={onRouteChange}
+              onFocusLocation={onFocusLocation}
             />
           )}
           {mode === 'road' && (
@@ -58,6 +65,7 @@ function App() {
               onProfileChange={setProfile}
               onMarkersChange={onMarkersChange}
               onRouteChange={onRouteChange}
+              onFocusLocation={onFocusLocation}
             />
           )}
           {mode === 'waypoints' && (
@@ -67,6 +75,7 @@ function App() {
               waypoints={waypoints}
               onWaypointsChange={setWaypoints}
               onRouteChange={onRouteChange}
+              onFocusLocation={onFocusLocation}
             />
           )}
         </aside>
@@ -82,6 +91,7 @@ function App() {
               if (mode !== 'waypoints') return
               setWaypoints((prev) => [...prev, ll])
             }}
+            focus={focusLocation}
           />
         </main>
       </div>

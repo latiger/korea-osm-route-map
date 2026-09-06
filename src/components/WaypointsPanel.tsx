@@ -10,6 +10,7 @@ interface Props {
   waypoints: LatLng[]
   onWaypointsChange: (pts: LatLng[]) => void
   onRouteChange: (route: RouteResult | null) => void
+  onFocusLocation?: (ll: LatLng) => void
 }
 
 export function WaypointsPanel({
@@ -18,6 +19,7 @@ export function WaypointsPanel({
   waypoints,
   onWaypointsChange,
   onRouteChange,
+  onFocusLocation,
 }: Props) {
   const [route, setRoute] = useState<RouteResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -102,7 +104,7 @@ export function WaypointsPanel({
         </div>
       </div>
       {error && <p className="error">{error}</p>}
-      <RouteSummary route={route} />
+      <RouteSummary route={route} onStepClick={onFocusLocation} />
     </div>
   )
 }

@@ -255,6 +255,36 @@ button.danger {
   background: #1e293b;
 }
 
+.route-step:has(> .route-step-button) {
+  padding: 0;
+}
+
+.route-step-button {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  margin: 0;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.route-step-button:hover {
+  background: #1e3a5f;
+}
+
+.route-step-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+
 .route-step-symbol {
   flex-shrink: 0;
   width: 1.5rem;

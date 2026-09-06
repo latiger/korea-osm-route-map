@@ -1,8 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import {
   MapContainer,
   TileLayer,
   Marker,
+  CircleMarker,
   Polyline,
   useMap,
   useMapEvents,
@@ -29,6 +30,7 @@ export const SEOUL_CENTER: LatLng = { lat: 37.5665, lng: 126.978 }
 export const DEFAULT_ZOOM = 12
 
 const ROUTE_STYLE = { color: '#2563eb', weight: 5, opacity: 0.85 }
+const FOCUS_ZOOM = 14.5
 
 const waypointIcon = (n: number) =>
   L.divIcon({
@@ -46,6 +48,11 @@ function FitBounds({
   route: LatLng[]
 }) {
   const map = useMap()
+  // Content key so new array refs on focus re-renders do not re-fit (and undo FlyTo)
+  const key = JSON.stringify([
+    points.map((p) => [p.lat, p.lng]),
+    route.map((p) => [p.lat, p.lng]),
+  ])
   useEffect(() => {
     const all = [...points, ...route]
     if (all.length === 0) return
@@ -55,7 +62,24 @@ function FitBounds({
     }
     const bounds = L.latLngBounds(all.map((p) => [p.lat, p.lng] as [number, number]))
     map.fitBounds(bounds, { padding: [48, 48], maxZoom: 16 })
-  }, [map, points, route])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- points/route via key
+  }, [map, key])
+  return null
+}
+
+function FlyTo({
+  focus,
+  onFlew,
+}: {
+  focus?: LatLng | null
+  onFlew?: (ll: LatLng) => void
+}) {
+  const map = useMap()
+  useEffect(() => {
+    if (!focus) return
+    map.flyTo([focus.lat, focus.lng], FOCUS_ZOOM, { duration: 0.6 })
+    onFlew?.(focus)
+  }, [map, focus, onFlew])
   return null
 }
 
@@ -87,6 +111,8 @@ export interface MapCanvasProps {
   routeLineStrings?: LatLng[][]
   clickToAddWaypoints?: boolean
   onMapClick?: (ll: LatLng) => void
+  /** Pan/zoom target from route-step click */
+  focus?: LatLng | null
 }
 
 export function MapCanvas({
@@ -96,7 +122,16 @@ export function MapCanvas({
   routeLineStrings,
   clickToAddWaypoints = false,
   onMapClick,
+  focus = null,
 }: MapCanvasProps) {
+  const [highlight, setHighlight] = useState<LatLng | null>(null)
+
+  useEffect(() => {
+    if (!highlight) return
+    const t = window.setTimeout(() => setHighlight(null), 2200)
+    return () => window.clearTimeout(t)
+  }, [highlight])
+
   const fitPoints = [
     ...markers.map((m) => ({ lat: m.lat, lng: m.lng })),
     ...waypoints,
@@ -123,6 +158,7 @@ export function MapCanvas({
         onClick={(ll) => onMapClick?.(ll)}
       />
       <FitBounds points={fitPoints} route={fitRoute} />
+      <FlyTo focus={focus} onFlew={setHighlight} />
       {markers.map((m) => (
         <Marker key={m.key} position={[m.lat, m.lng]} title={m.label} />
       ))}
@@ -133,6 +169,18 @@ export function MapCanvas({
           icon={waypointIcon(i + 1)}
         />
       ))}
+      {highlight && (
+        <CircleMarker
+          center={[highlight.lat, highlight.lng]}
+          radius={12}
+          pathOptions={{
+            color: '#38bdf8',
+            fillColor: '#38bdf8',
+            fillOpacity: 0.35,
+            weight: 2,
+          }}
+        />
+      )}
       {useMulti
         ? multi.map((line, i) => (
             <Polyline

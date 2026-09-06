@@ -23,8 +23,23 @@ export interface RoadMatch {
   geometry?: LatLng[]
 }
 
+export interface RouteStep {
+  /** OSRM maneuver.type */
+  type: string
+  /** OSRM maneuver.modifier (left, right, straight, …) */
+  modifier?: string
+  /** Korean label for the maneuver */
+  label: string
+  /** Road / street name from OSRM (may be English) */
+  name: string
+  distanceMeters: number
+  durationSeconds: number
+  location?: LatLng
+}
+
 export interface RouteResult {
   coordinates: LatLng[]
   distanceMeters: number
   durationSeconds: number
+  steps: RouteStep[]
 }

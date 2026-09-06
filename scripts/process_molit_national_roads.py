@@ -204,10 +204,20 @@ def main():
             if len(display_lines) > 1
             else (display_lines[0] if display_lines else []),
         }
-        flat = []
-        for line in display_lines:
-            flat.extend({"lat": p[1], "lng": p[0]} for p in line)
-        route_file = {**route_obj, "geometry": geom_payload, "coordinates": flat}
+        # Explicit per-segment polylines for the client (do NOT flatten into one path —
+        # concatenating MultiLineString segments creates jumper "spaghetti" on the map).
+        lines_latlng = [
+            [{"lat": p[1], "lng": p[0]} for p in line] for line in display_lines
+        ]
+        # coordinates = longest line only (markers / single-path fallback), not a concat
+        longest = max(display_lines, key=len) if display_lines else []
+        coordinates_primary = [{"lat": p[1], "lng": p[0]} for p in longest]
+        route_file = {
+            **route_obj,
+            "geometry": geom_payload,
+            "lines": lines_latlng,
+            "coordinates": coordinates_primary,
+        }
         (OUT_DIR / f"{route_no_norm}.json").write_text(
             json.dumps(route_file, ensure_ascii=False, separators=(",", ":")),
             encoding="utf-8",

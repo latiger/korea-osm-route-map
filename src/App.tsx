@@ -76,6 +76,7 @@ function App() {
             markers={mode === 'waypoints' ? [] : markers}
             waypoints={mode === 'waypoints' ? waypoints : []}
             route={route?.coordinates ?? []}
+            routeLineStrings={route?.lineStrings}
             clickToAddWaypoints={mode === 'waypoints'}
             onMapClick={(ll) => {
               if (mode !== 'waypoints') return

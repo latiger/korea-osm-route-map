@@ -1,4 +1,4 @@
-import type { LatLng, RoadMatch } from '../types'
+import type { LatLng, RoadMatch, RouteResult, RouteStep } from '../types'
 import { parseRoadQuery } from './overpass'
 
 export interface NationalRoadIndexEntry {
@@ -25,12 +25,19 @@ interface NationalRoadIndex {
 }
 
 interface NationalRoadDetail extends NationalRoadIndexEntry {
+  /** Longest / primary line only (markers); prefer lines / geometry */
   coordinates?: LatLng[]
+  /** Explicit multi-polyline LatLng paths (preferred) */
+  lines?: LatLng[][]
   geometry?: {
     type: string
     coordinates: unknown
   }
 }
+
+const MAX_OFFICIAL_STEPS = 40
+/** Merge consecutive segments shorter than this into one step label */
+const TINY_SEGMENT_M = 500
 
 let indexCache: NationalRoadIndex | null = null
 let indexPromise: Promise<NationalRoadIndex | null> | null = null
@@ -63,10 +70,136 @@ async function loadRouteDetail(file: string): Promise<NationalRoadDetail | null>
   }
 }
 
-function toMatch(entry: NationalRoadIndexEntry, detail?: NationalRoadDetail | null): RoadMatch {
-  const geometry = detail?.coordinates?.length
-    ? detail.coordinates
-    : entry.sampleLine?.map(([lng, lat]) => ({ lat, lng }))
+function lngLatToLatLng(pt: [number, number] | number[]): LatLng {
+  return { lng: pt[0], lat: pt[1] }
+}
+
+/** Extract separate polylines from MOLIT detail (never flatten MultiLineString). */
+export function parseOfficialLineStrings(detail: NationalRoadDetail): LatLng[][] {
+  if (detail.lines?.length) {
+    return detail.lines.filter((l) => l.length >= 2)
+  }
+
+  const geom = detail.geometry
+  if (geom?.coordinates != null) {
+    if (geom.type === 'MultiLineString' && Array.isArray(geom.coordinates)) {
+      return (geom.coordinates as number[][][])
+        .map((line) => line.map(lngLatToLatLng))
+        .filter((line) => line.length >= 2)
+    }
+    if (geom.type === 'LineString' && Array.isArray(geom.coordinates)) {
+      const line = (geom.coordinates as number[][]).map(lngLatToLatLng)
+      return line.length >= 2 ? [line] : []
+    }
+  }
+
+  if (detail.coordinates && detail.coordinates.length >= 2) {
+    return [detail.coordinates]
+  }
+  return []
+}
+
+function pathLengthMeters(path: LatLng[]): number {
+  let acc = 0
+  for (let i = 1; i < path.length; i++) {
+    acc += haversineMeters(path[i - 1], path[i])
+  }
+  return acc
+}
+
+function longestLine(lineStrings: LatLng[][]): LatLng[] {
+  if (!lineStrings.length) return []
+  return lineStrings.reduce((best, cur) =>
+    cur.length > best.length ? cur : best,
+  )
+}
+
+/**
+ * Build Korean step list from each lineString.
+ * Tiny consecutive segments are merged for the list; map still draws all lines.
+ * Caps with “외 N구간” when too many.
+ */
+function buildOfficialSteps(
+  lineStrings: LatLng[][],
+  roadName: string,
+  agencies?: string[],
+): RouteStep[] {
+  type Seg = { dist: number; location?: LatLng; count: number }
+  const raw: Seg[] = lineStrings.map((line) => ({
+    dist: pathLengthMeters(line),
+    location: line[0],
+    count: 1,
+  }))
+
+  const merged: Seg[] = []
+  for (const seg of raw) {
+    const last = merged[merged.length - 1]
+    if (last && (seg.dist < TINY_SEGMENT_M || last.dist < TINY_SEGMENT_M)) {
+      last.dist += seg.dist
+      last.count += seg.count
+    } else {
+      merged.push({ ...seg })
+    }
+  }
+
+  const agencyHint =
+    agencies && agencies.length > 0 && agencies.length <= 3
+      ? agencies.join('·')
+      : agencies && agencies.length > 3
+        ? `${agencies.slice(0, 2).join('·')} 외`
+        : ''
+
+  let overflowExtra = 0
+  let segsForSteps = merged
+  if (merged.length > MAX_OFFICIAL_STEPS) {
+    const keep = MAX_OFFICIAL_STEPS - 1
+    const head = merged.slice(0, keep)
+    const tail = merged.slice(keep)
+    overflowExtra = tail.reduce((n, s) => n + s.count, 0)
+    const overflowDist = tail.reduce((n, s) => n + s.dist, 0)
+    segsForSteps = [
+      ...head,
+      {
+        dist: overflowDist,
+        location: tail[0]?.location,
+        count: overflowExtra,
+      },
+    ]
+  }
+
+  return segsForSteps.map((seg, i) => {
+    const isOverflow = i === segsForSteps.length - 1 && overflowExtra > 0
+    const km = (seg.dist / 1000).toFixed(1)
+    const label = isOverflow
+      ? `외 ${overflowExtra}구간 · ${km} km`
+      : seg.count > 1
+        ? `구간 ${i + 1} (${seg.count}개 합침) · ${km} km`
+        : `구간 ${i + 1} · ${km} km`
+    return {
+      type: 'continue',
+      label,
+      name: agencyHint || roadName,
+      distanceMeters: seg.dist,
+      durationSeconds: (seg.dist / 1000 / 60) * 3600,
+      location: seg.location,
+    }
+  })
+}
+
+function toMatch(
+  entry: NationalRoadIndexEntry,
+  detail?: NationalRoadDetail | null,
+): RoadMatch {
+  const lineStrings = detail
+    ? parseOfficialLineStrings(detail)
+    : entry.sampleLine?.length
+      ? [entry.sampleLine.map(([lng, lat]) => ({ lat, lng }))]
+      : undefined
+
+  const geometry = lineStrings?.length
+    ? longestLine(lineStrings)
+    : undefined
+
   return {
     id: `molit:national:${entry.routeNo}`,
     name: entry.name,
@@ -74,8 +207,10 @@ function toMatch(entry: NationalRoadIndexEntry, detail?: NationalRoadDetail | nu
     start: entry.start,
     end: entry.end,
     geometry,
+    lineStrings,
     source: 'molit',
     lengthMeters: entry.lengthMetersApprox,
+    agencies: entry.agencies ?? detail?.agencies,
   }
 }
 
@@ -101,7 +236,8 @@ export async function searchNationalRoads(
   const matches: NationalRoadIndexEntry[] = []
 
   if (parsed.kind === 'national' && parsed.ref) {
-    const entry = index.routes[parsed.ref] || index.routes[parsed.ref.padStart(2, '0')]
+    const entry =
+      index.routes[parsed.ref] || index.routes[parsed.ref.padStart(2, '0')]
     if (entry) matches.push(entry)
   } else {
     const lower = q.toLowerCase()
@@ -118,7 +254,6 @@ export async function searchNationalRoads(
 
   if (!matches.length) return []
 
-  // Load full geometry for first few matches (usually 1)
   const out: RoadMatch[] = []
   for (const entry of matches.slice(0, 5)) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
@@ -128,23 +263,31 @@ export async function searchNationalRoads(
   return out
 }
 
-/** Build a RouteResult-like coordinate path from official geometry (no OSRM). */
-export function routeFromOfficialGeometry(
-  match: RoadMatch,
-): { coordinates: LatLng[]; distanceMeters: number; durationSeconds: number } | null {
-  if (!match.geometry || match.geometry.length < 2) return null
+/**
+ * Build a RouteResult from official MultiLineString geometry (no OSRM).
+ * Uses lineStrings for map drawing; coordinates = longest line (markers/fallback).
+ */
+export function routeFromOfficialGeometry(match: RoadMatch): RouteResult | null {
+  const lineStrings =
+    match.lineStrings?.filter((l) => l.length >= 2) ??
+    (match.geometry && match.geometry.length >= 2 ? [match.geometry] : [])
+
+  if (!lineStrings.length) return null
+
   const distanceMeters =
     match.lengthMeters ??
-    match.geometry.reduce((acc, p, i, arr) => {
-      if (i === 0) return 0
-      return acc + haversineMeters(arr[i - 1], p)
-    }, 0)
-  // Rough driving ETA at 60 km/h for summary only
+    lineStrings.reduce((acc, line) => acc + pathLengthMeters(line), 0)
+
   const durationSeconds = (distanceMeters / 1000 / 60) * 3600
+  const steps = buildOfficialSteps(lineStrings, match.name, match.agencies)
+
   return {
-    coordinates: match.geometry,
+    coordinates: longestLine(lineStrings),
+    lineStrings,
     distanceMeters,
     durationSeconds,
+    steps,
+    fromOfficialGeometry: true,
   }
 }
 

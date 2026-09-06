@@ -64,14 +64,10 @@ export function RoadNamePanel({
     setLoading(true)
     setError(null)
     try {
-      // Prefer official centerline geometry when present
+      // Prefer official centerline geometry when present (multi-line + steps)
       const official = routeFromOfficialGeometry(match)
       if (official) {
-        setRoute({
-          ...official,
-          steps: [],
-          fromOfficialGeometry: true,
-        })
+        setRoute(official)
         return
       }
 

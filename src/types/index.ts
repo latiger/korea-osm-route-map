@@ -20,7 +20,13 @@ export interface RoadMatch {
   label: string
   start: LatLng
   end: LatLng
+  /** Single continuous path (legacy / OSRM / longest official segment) */
   geometry?: LatLng[]
+  /**
+   * Preferred for official MultiLineString roads: each entry is one polyline.
+   * Draw these separately — do not concatenate (creates jumper spaghetti).
+   */
+  lineStrings?: LatLng[][]
   /** Data provenance for 도로명 mode */
   source?: 'molit' | 'ex' | 'overpass' | 'nominatim'
   /** Official / estimated length in meters when known */
@@ -29,6 +35,8 @@ export interface RoadMatch {
   exRouteNo?: string
   /** When true, geometry/start/end are placeholders — use Overpass */
   needsGeometryFallback?: boolean
+  /** Managing agencies from MOLIT when available */
+  agencies?: string[]
 }
 
 export interface RouteStep {
@@ -46,7 +54,15 @@ export interface RouteStep {
 }
 
 export interface RouteResult {
-  coordinates: LatLng[]
+  /**
+   * Single path for markers / FitBounds fallback / OSRM routes.
+   * For official MultiLineString, prefer `lineStrings` for drawing.
+   */
+  coordinates?: LatLng[]
+  /**
+   * Preferred drawing path for official roads: one Polyline per entry.
+   */
+  lineStrings?: LatLng[][]
   distanceMeters: number
   durationSeconds: number
   steps: RouteStep[]

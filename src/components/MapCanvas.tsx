@@ -28,6 +28,8 @@ L.Marker.prototype.options.icon = DefaultIcon
 export const SEOUL_CENTER: LatLng = { lat: 37.5665, lng: 126.978 }
 export const DEFAULT_ZOOM = 12
 
+const ROUTE_STYLE = { color: '#2563eb', weight: 5, opacity: 0.85 }
+
 const waypointIcon = (n: number) =>
   L.divIcon({
     className: 'waypoint-marker',
@@ -76,7 +78,13 @@ function ClickHandler({
 export interface MapCanvasProps {
   markers?: Array<LatLng & { key: string; label?: string }>
   waypoints?: LatLng[]
+  /** Single polyline (OSRM / fallback) */
   route?: LatLng[]
+  /**
+   * Official MultiLineString roads: draw each entry as its own Polyline.
+   * When present and non-empty, preferred over `route`.
+   */
+  routeLineStrings?: LatLng[][]
   clickToAddWaypoints?: boolean
   onMapClick?: (ll: LatLng) => void
 }
@@ -85,6 +93,7 @@ export function MapCanvas({
   markers = [],
   waypoints = [],
   route = [],
+  routeLineStrings,
   clickToAddWaypoints = false,
   onMapClick,
 }: MapCanvasProps) {
@@ -92,6 +101,11 @@ export function MapCanvas({
     ...markers.map((m) => ({ lat: m.lat, lng: m.lng })),
     ...waypoints,
   ]
+
+  const multi =
+    routeLineStrings?.filter((line) => line.length > 1) ?? []
+  const useMulti = multi.length > 0
+  const fitRoute = useMulti ? multi.flat() : route
 
   return (
     <MapContainer
@@ -108,7 +122,7 @@ export function MapCanvas({
         enabled={clickToAddWaypoints}
         onClick={(ll) => onMapClick?.(ll)}
       />
-      <FitBounds points={fitPoints} route={route} />
+      <FitBounds points={fitPoints} route={fitRoute} />
       {markers.map((m) => (
         <Marker key={m.key} position={[m.lat, m.lng]} title={m.label} />
       ))}
@@ -119,12 +133,20 @@ export function MapCanvas({
           icon={waypointIcon(i + 1)}
         />
       ))}
-      {route.length > 1 && (
-        <Polyline
-          positions={route.map((p) => [p.lat, p.lng] as [number, number])}
-          pathOptions={{ color: '#2563eb', weight: 5, opacity: 0.85 }}
-        />
-      )}
+      {useMulti
+        ? multi.map((line, i) => (
+            <Polyline
+              key={`route-line-${i}`}
+              positions={line.map((p) => [p.lat, p.lng] as [number, number])}
+              pathOptions={ROUTE_STYLE}
+            />
+          ))
+        : route.length > 1 && (
+            <Polyline
+              positions={route.map((p) => [p.lat, p.lng] as [number, number])}
+              pathOptions={ROUTE_STYLE}
+            />
+          )}
     </MapContainer>
   )
 }

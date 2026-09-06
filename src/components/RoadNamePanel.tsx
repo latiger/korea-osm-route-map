@@ -13,10 +13,44 @@ import {
 import { searchRoadsNominatim } from '../api/nominatim'
 import { searchRoadsOverpass } from '../api/overpass'
 import { buildChainMarkers, buildChainedRoute } from '../api/roadChain'
-import type { LatLng, RoadMatch, RouteResult, TravelProfile } from '../types'
+import { fetchRoute, formatDistance } from '../api/route'
+import type {
+  LatLng,
+  RoadMatch,
+  RouteGapInfo,
+  RouteResult,
+  TravelProfile,
+} from '../types'
 import { GapList } from './GapList'
 import { ProfileToggle } from './ProfileToggle'
 import { RouteSummary } from './RouteSummary'
+
+function coordsNear(a: LatLng, b: LatLng, eps = 1e-5): boolean {
+  return Math.abs(a.lat - b.lat) < eps && Math.abs(a.lng - b.lng) < eps
+}
+
+function connectorCoordsFromRoute(r: RouteResult, from: LatLng, to: LatLng): LatLng[] {
+  if (r.trafficSegments?.length) {
+    const flat = r.trafficSegments.flatMap((s) => s.coordinates)
+    if (flat.length >= 2) return flat
+  }
+  if (r.lineStrings?.length) {
+    const flat = r.lineStrings.flat()
+    if (flat.length >= 2) return flat
+  }
+  if (r.coordinates && r.coordinates.length >= 2) return r.coordinates
+  return [from, to]
+}
+
+function sameStraightConnector(line: LatLng[], from: LatLng, to: LatLng): boolean {
+  if (line.length < 2) return false
+  const a = line[0]
+  const b = line[line.length - 1]
+  return (
+    (coordsNear(a, from) && coordsNear(b, to)) ||
+    (coordsNear(a, to) && coordsNear(b, from))
+  )
+}
 
 interface Props {
   profile: TravelProfile
@@ -53,8 +87,21 @@ export function RoadNamePanel({
     null,
   )
   const dragIndexRef = useRef<number | null>(null)
+  const chainBeforeDragRef = useRef<RoadMatch[] | null>(null)
+  const chainPreviewRef = useRef<RoadMatch[] | null>(null)
+  const didDropRef = useRef(false)
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null)
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  /** Live reorder preview during drag — do not rebuild route until drop */
+  const [chainPreview, setChainPreviewState] = useState<RoadMatch[] | null>(null)
+
+  function setChainPreview(next: RoadMatch[] | null) {
+    chainPreviewRef.current = next
+    setChainPreviewState(next)
+  }
+  const [connectingId, setConnectingId] = useState<string | null>(null)
+  const [connectingAll, setConnectingAll] = useState(false)
+  const [connectError, setConnectError] = useState<string | null>(null)
+  const connectAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (!chain.length) {
@@ -126,58 +173,273 @@ export function RoadNamePanel({
   }
 
   function removeAt(index: number) {
-    const next = chain.filter((_, i) => i !== index)
+    const display = chainPreview ?? chain
+    const next = display.filter((_, i) => i !== index)
+    setChainPreview(null)
     applyChain(next)
   }
 
   function resetDrag() {
     dragIndexRef.current = null
+    chainBeforeDragRef.current = null
+    didDropRef.current = false
     setDraggingIndex(null)
-    setDragOverIndex(null)
+    setChainPreview(null)
   }
 
-  function reorderChain(from: number, to: number) {
-    if (from === to || from < 0 || to < 0 || from >= chain.length || to >= chain.length) {
-      return
-    }
-    const next = [...chain]
-    const [item] = next.splice(from, 1)
-    next.splice(to, 0, item)
-    void applyChain(next)
-  }
-
-  function handleChipDragStart(e: DragEvent, index: number) {
+  function handleHandleDragStart(e: DragEvent, index: number) {
     if (loading) {
       e.preventDefault()
       return
     }
+    didDropRef.current = false
     dragIndexRef.current = index
+    chainBeforeDragRef.current = chain
+    setChainPreview(chain)
     setDraggingIndex(index)
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', String(index))
+
+    const handle = e.currentTarget as HTMLElement
+    const chip = handle.closest('.road-chain-chip') as HTMLElement | null
+    if (chip) {
+      const rect = chip.getBoundingClientRect()
+      e.dataTransfer.setDragImage(
+        chip,
+        Math.max(0, e.clientX - rect.left),
+        Math.max(0, e.clientY - rect.top),
+      )
+    }
   }
 
-  function handleChipDragOver(e: DragEvent, index: number) {
+  function handleChipDragOver(e: DragEvent, overIndex: number) {
     if (loading || dragIndexRef.current == null) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
-    if (dragOverIndex !== index) setDragOverIndex(index)
+    const from = dragIndexRef.current
+    if (from === overIndex) return
+    const base = chainPreviewRef.current ?? chainBeforeDragRef.current ?? chain
+    if (
+      from < 0 ||
+      overIndex < 0 ||
+      from >= base.length ||
+      overIndex >= base.length
+    ) {
+      return
+    }
+    const next = [...base]
+    const [item] = next.splice(from, 1)
+    next.splice(overIndex, 0, item)
+    setChainPreview(next)
+    dragIndexRef.current = overIndex
+    setDraggingIndex(overIndex)
   }
 
-  function handleChipDrop(e: DragEvent, index: number) {
+  function handleChipDrop(e: DragEvent) {
     e.preventDefault()
+    e.stopPropagation()
     if (loading) {
       resetDrag()
       return
     }
-    const from = dragIndexRef.current
-    resetDrag()
-    if (from == null) return
-    reorderChain(from, index)
+    didDropRef.current = true
+    const preview = chainPreviewRef.current ?? chainBeforeDragRef.current
+    const before = chainBeforeDragRef.current
+    dragIndexRef.current = null
+    chainBeforeDragRef.current = null
+    setDraggingIndex(null)
+    setChainPreview(null)
+    if (!preview || !before) return
+    const changed =
+      preview.length !== before.length ||
+      preview.some((m, i) => m.id !== before[i]?.id || m !== before[i])
+    if (changed) void applyChain(preview)
   }
 
   function handleChipDragEnd() {
-    resetDrag()
+    if (!didDropRef.current) {
+      // Cancelled — restore previous order (chain state untouched)
+      setChainPreview(null)
+    }
+    dragIndexRef.current = null
+    chainBeforeDragRef.current = null
+    didDropRef.current = false
+    setDraggingIndex(null)
+  }
+
+  function applyConnectedRoute(next: RouteResult) {
+    // useEffect syncs onRouteChange when route state updates
+    setRoute(next)
+  }
+
+  async function connectGap(gap: RouteGapInfo) {
+    if (!route) return
+    if (gap.kind !== 'skipped' && gap.kind !== 'straight') return
+
+    connectAbortRef.current?.abort()
+    const ac = new AbortController()
+    connectAbortRef.current = ac
+    setConnectingId(gap.id)
+    setConnectError(null)
+    try {
+      // Official road gaps: drive even in walk mode
+      const connectProfile: TravelProfile =
+        route.fromOfficialGeometry || route.source === 'official'
+          ? 'driving'
+          : profile
+      const conn = await fetchRoute([gap.from, gap.to], connectProfile, ac.signal)
+      if (ac.signal.aborted) return
+
+      const connector = connectorCoordsFromRoute(conn, gap.from, gap.to)
+      const prevConnectors = route.connectorLineStrings ?? []
+      let nextConnectors: LatLng[][]
+      if (gap.kind === 'straight') {
+        const replaced = prevConnectors.filter(
+          (line) => !sameStraightConnector(line, gap.from, gap.to),
+        )
+        nextConnectors = [...replaced, connector]
+      } else {
+        nextConnectors = [...prevConnectors, connector]
+      }
+
+      let distanceMeters = route.distanceMeters
+      let durationSeconds = route.durationSeconds
+      if (gap.kind === 'straight') {
+        const straightDur = (gap.gapMeters / 1000 / 60) * 3600
+        distanceMeters = distanceMeters - gap.gapMeters + conn.distanceMeters
+        durationSeconds = durationSeconds - straightDur + conn.durationSeconds
+      } else {
+        distanceMeters += conn.distanceMeters
+        durationSeconds += conn.durationSeconds
+      }
+
+      const gaps = (route.gaps ?? []).map((g) =>
+        g.id === gap.id ? { ...g, kind: 'routed' as const } : g,
+      )
+
+      const steps = [
+        ...route.steps,
+        {
+          type: 'connect',
+          label: `연결 · ${formatDistance(conn.distanceMeters)}`,
+          name: '연결',
+          distanceMeters: conn.distanceMeters,
+          durationSeconds: conn.durationSeconds,
+          location: gap.from,
+        },
+      ]
+
+      const nextRoute: RouteResult = {
+        ...route,
+        connectorLineStrings: nextConnectors,
+        distanceMeters,
+        durationSeconds,
+        gaps,
+        steps,
+      }
+      applyConnectedRoute(nextRoute)
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') return
+      setConnectError((e as Error).message || '구간 연결에 실패했습니다.')
+    } finally {
+      if (!ac.signal.aborted) setConnectingId(null)
+    }
+  }
+
+  async function connectAllGaps() {
+    if (!route?.gaps?.length) return
+    const targets = [...route.gaps]
+      .filter((g) => g.kind === 'skipped' || g.kind === 'straight')
+      .sort((a, b) => a.gapMeters - b.gapMeters)
+      .slice(0, 10)
+    if (!targets.length) return
+
+    setConnectingAll(true)
+    setConnectError(null)
+    try {
+      let current = route
+      for (const gap of targets) {
+        // Re-read kind from latest route (may already be connected)
+        const live = current.gaps?.find((g) => g.id === gap.id)
+        if (!live || (live.kind !== 'skipped' && live.kind !== 'straight')) {
+          continue
+        }
+        connectAbortRef.current?.abort()
+        const ac = new AbortController()
+        connectAbortRef.current = ac
+        setConnectingId(live.id)
+        try {
+          const connectProfile: TravelProfile =
+            current.fromOfficialGeometry || current.source === 'official'
+              ? 'driving'
+              : profile
+          const conn = await fetchRoute(
+            [live.from, live.to],
+            connectProfile,
+            ac.signal,
+          )
+          if (ac.signal.aborted) return
+
+          const connector = connectorCoordsFromRoute(conn, live.from, live.to)
+          const prevConnectors = current.connectorLineStrings ?? []
+          let nextConnectors: LatLng[][]
+          if (live.kind === 'straight') {
+            const replaced = prevConnectors.filter(
+              (line) => !sameStraightConnector(line, live.from, live.to),
+            )
+            nextConnectors = [...replaced, connector]
+          } else {
+            nextConnectors = [...prevConnectors, connector]
+          }
+
+          let distanceMeters = current.distanceMeters
+          let durationSeconds = current.durationSeconds
+          if (live.kind === 'straight') {
+            const straightDur = (live.gapMeters / 1000 / 60) * 3600
+            distanceMeters =
+              distanceMeters - live.gapMeters + conn.distanceMeters
+            durationSeconds =
+              durationSeconds - straightDur + conn.durationSeconds
+          } else {
+            distanceMeters += conn.distanceMeters
+            durationSeconds += conn.durationSeconds
+          }
+
+          const gaps = (current.gaps ?? []).map((g) =>
+            g.id === live.id ? { ...g, kind: 'routed' as const } : g,
+          )
+          const steps = [
+            ...current.steps,
+            {
+              type: 'connect',
+              label: `연결 · ${formatDistance(conn.distanceMeters)}`,
+              name: '연결',
+              distanceMeters: conn.distanceMeters,
+              durationSeconds: conn.durationSeconds,
+              location: live.from,
+            },
+          ]
+          current = {
+            ...current,
+            connectorLineStrings: nextConnectors,
+            distanceMeters,
+            durationSeconds,
+            gaps,
+            steps,
+          }
+          applyConnectedRoute(current)
+        } catch (e) {
+          if ((e as Error).name === 'AbortError') return
+          setConnectError(
+            (e as Error).message || '일괄 연결 중 오류가 발생했습니다.',
+          )
+          break
+        }
+      }
+    } finally {
+      setConnectingId(null)
+      setConnectingAll(false)
+    }
   }
 
   function clearChain() {
@@ -187,6 +449,8 @@ export function RoadNamePanel({
   function clearAll() {
     abortRef.current?.abort()
     abortRef.current = null
+    connectAbortRef.current?.abort()
+    connectAbortRef.current = null
     setRoadText('')
     setMatches([])
     setChain([])
@@ -194,7 +458,11 @@ export function RoadNamePanel({
     setRoute(null)
     setError(null)
     setDataNote(null)
+    setConnectError(null)
+    setConnectingId(null)
+    setConnectingAll(false)
     setLoading(false)
+    setChainPreview(null)
     metaRef.current = null
     onMarkersChange([])
     onRouteChange(null)
@@ -366,12 +634,19 @@ export function RoadNamePanel({
               체인 비우기
             </button>
           </div>
-          <ol className="road-chain-list">
-            {chain.map((m, i) => {
+          <ol
+            className="road-chain-list"
+            onDragOver={(e) => {
+              if (dragIndexRef.current == null) return
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+            }}
+            onDrop={handleChipDrop}
+          >
+            {(chainPreview ?? chain).map((m, i) => {
               const chipClass = [
                 'road-chain-chip',
                 draggingIndex === i ? 'dragging' : '',
-                dragOverIndex === i && draggingIndex !== i ? 'drag-over' : '',
               ]
                 .filter(Boolean)
                 .join(' ')
@@ -379,14 +654,18 @@ export function RoadNamePanel({
                 <li
                   key={`${m.id}-${i}`}
                   className={chipClass}
-                  draggable={!loading}
-                  onDragStart={(e) => handleChipDragStart(e, i)}
                   onDragOver={(e) => handleChipDragOver(e, i)}
-                  onDrop={(e) => handleChipDrop(e, i)}
+                  onDrop={handleChipDrop}
                   onDragEnd={handleChipDragEnd}
                 >
-                  <span className="road-chain-drag-handle" aria-hidden>
-                    ⠿
+                  <span
+                    className="road-chain-drag-handle"
+                    draggable={!loading}
+                    onDragStart={(e) => handleHandleDragStart(e, i)}
+                    aria-label="순서 변경"
+                    title="드래그하여 순서 변경"
+                  >
+                    ⋮⋮
                   </span>
                   <span className="road-chain-chip-label">
                     {i + 1}. {m.name}
@@ -396,8 +675,9 @@ export function RoadNamePanel({
                     className="road-chain-remove"
                     aria-label={`${m.name} 제거`}
                     onClick={() => removeAt(i)}
-                    disabled={loading}
+                    disabled={loading || chainPreview != null}
                     onMouseDown={(e) => e.stopPropagation()}
+                    onDragStart={(e) => e.preventDefault()}
                   >
                     ×
                   </button>
@@ -467,9 +747,17 @@ export function RoadNamePanel({
       )}
 
       {error && <p className="error">{error}</p>}
+      {connectError && <p className="error">{connectError}</p>}
       {dataNote && <p className="hint">{dataNote}</p>}
       {route?.gaps && route.gaps.length > 0 && (
-        <GapList gaps={route.gaps} onFocusLocation={onFocusLocation} />
+        <GapList
+          gaps={route.gaps}
+          onFocusLocation={onFocusLocation}
+          onConnectGap={connectGap}
+          connectingId={connectingId}
+          onConnectAllGaps={connectAllGaps}
+          connectingAll={connectingAll}
+        />
       )}
       <RouteSummary route={route} onStepClick={onFocusLocation} />
       <p className="hint muted">

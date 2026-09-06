@@ -1,4 +1,4 @@
-import type { GeocodeResult } from '../types'
+import type { GeocodeResult, LatLng } from '../types'
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org'
 const USER_AGENT =
@@ -407,4 +407,46 @@ export async function searchRoadsNominatim(
 
   const freeData = (await freeRes.json()) as NominatimHit[]
   return mapResults(freeData)
+}
+
+
+/**
+ * Nominatim reverse geocode (fallback when Kakao key missing).
+ */
+export async function reverseGeocodeNominatim(
+  ll: LatLng,
+  signal?: AbortSignal,
+): Promise<GeocodeResult> {
+  const params = new URLSearchParams({
+    lat: String(ll.lat),
+    lon: String(ll.lng),
+    format: 'json',
+    addressdetails: '1',
+    zoom: '18',
+    'accept-language': 'ko',
+  })
+  const res = await fetch(`${NOMINATIM}/reverse?${params}`, {
+    signal,
+    headers: NOMINATIM_HEADERS,
+  })
+  if (!res.ok) {
+    throw new Error(`역지오코딩 실패 (${res.status})`)
+  }
+  const item = (await res.json()) as NominatimHit & { error?: string }
+  if (item.error || !item.lat) {
+    return {
+      id: `nominatim:coord:${ll.lat.toFixed(6)},${ll.lng.toFixed(6)}`,
+      label: `${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)}`,
+      lat: ll.lat,
+      lng: ll.lng,
+      type: 'coordinates',
+    }
+  }
+  const mapped = mapResults([item])[0]
+  return {
+    ...mapped,
+    lat: ll.lat,
+    lng: ll.lng,
+    id: `nominatim:rev:${item.place_id}`,
+  }
 }

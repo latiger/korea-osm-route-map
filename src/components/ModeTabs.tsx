@@ -3,7 +3,6 @@ import type { AppMode } from '../types'
 const TABS: { id: AppMode; label: string }[] = [
   { id: 'od', label: '출발·도착' },
   { id: 'road', label: '도로명' },
-  { id: 'waypoints', label: '점 이어 경로' },
 ]
 
 interface Props {

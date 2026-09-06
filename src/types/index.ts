@@ -1,5 +1,6 @@
 export type TravelProfile = 'driving' | 'walking'
-export type AppMode = 'od' | 'road' | 'waypoints'
+export type AppMode = 'od' | 'road'
+export type PlaceMode = 'origin' | 'dest' | 'via'
 
 export interface LatLng {
   lat: number

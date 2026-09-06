@@ -1,10 +1,19 @@
 import { useCallback, useState } from 'react'
+import { reverseGeocodeKorea } from './api/geocode'
 import { MapCanvas } from './components/MapCanvas'
 import { ModeTabs } from './components/ModeTabs'
-import { OriginDestPanel } from './components/OriginDestPanel'
+import {
+  OriginDestPanel,
+  type MapResolvedPick,
+} from './components/OriginDestPanel'
 import { RoadNamePanel } from './components/RoadNamePanel'
-import { WaypointsPanel } from './components/WaypointsPanel'
-import type { AppMode, LatLng, RouteResult, TravelProfile } from './types'
+import type {
+  AppMode,
+  LatLng,
+  PlaceMode,
+  RouteResult,
+  TravelProfile,
+} from './types'
 import 'leaflet/dist/leaflet.css'
 import './App.css'
 
@@ -14,10 +23,12 @@ function App() {
   const [markers, setMarkers] = useState<
     Array<LatLng & { key: string; label?: string }>
   >([])
-  const [waypoints, setWaypoints] = useState<LatLng[]>([])
   const [route, setRoute] = useState<RouteResult | null>(null)
   const [focusLocation, setFocusLocation] = useState<LatLng | null>(null)
   const [fitRevision, setFitRevision] = useState(0)
+  const [placeMode, setPlaceMode] = useState<PlaceMode | null>(null)
+  const [mapPick, setMapPick] = useState<MapResolvedPick | null>(null)
+  const [placing, setPlacing] = useState(false)
 
   const onMarkersChange = useCallback(
     (m: Array<LatLng & { key: string; label?: string }>) => setMarkers(m),
@@ -25,7 +36,6 @@ function App() {
   )
   const onRouteChange = useCallback((r: RouteResult | null) => setRoute(r), [])
   const onFocusLocation = useCallback((ll: LatLng) => {
-    // New object so re-clicking the same step still triggers FlyTo
     setFocusLocation({ lat: ll.lat, lng: ll.lng })
   }, [])
 
@@ -39,7 +49,31 @@ function App() {
     setMarkers([])
     setRoute(null)
     setFocusLocation(null)
-    if (m !== 'waypoints') setWaypoints([])
+    setPlaceMode(null)
+    setMapPick(null)
+  }
+
+  async function handleMapPlace(role: PlaceMode, ll: LatLng) {
+    setPlacing(true)
+    try {
+      const result = await reverseGeocodeKorea(ll)
+      setMapPick({ role, result, nonce: Date.now() })
+    } catch (e) {
+      console.error('reverse geocode failed', e)
+      setMapPick({
+        role,
+        result: {
+          id: `coord:${ll.lat.toFixed(6)},${ll.lng.toFixed(6)}`,
+          label: `${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)}`,
+          lat: ll.lat,
+          lng: ll.lng,
+          type: 'coordinates',
+        },
+        nonce: Date.now(),
+      })
+    } finally {
+      setPlacing(false)
+    }
   }
 
   return (
@@ -63,6 +97,7 @@ function App() {
               onMarkersChange={onMarkersChange}
               onRouteChange={onRouteChange}
               onFocusLocation={onFocusLocation}
+              mapPick={mapPick}
             />
           )}
           {mode === 'road' && (
@@ -74,33 +109,28 @@ function App() {
               onFocusLocation={onFocusLocation}
             />
           )}
-          {mode === 'waypoints' && (
-            <WaypointsPanel
-              profile={profile}
-              onProfileChange={setProfile}
-              waypoints={waypoints}
-              onWaypointsChange={setWaypoints}
-              onRouteChange={onRouteChange}
-              onFocusLocation={onFocusLocation}
-            />
-          )}
         </aside>
 
         <main className="map-wrap">
           <MapCanvas
-            markers={mode === 'waypoints' ? [] : markers}
-            waypoints={mode === 'waypoints' ? waypoints : []}
+            markers={markers}
             route={route?.coordinates ?? []}
             routeLineStrings={route?.lineStrings}
             trafficSegments={route?.trafficSegments}
-            clickToAddWaypoints={mode === 'waypoints'}
-            onMapClick={(ll) => {
-              if (mode !== 'waypoints') return
-              setWaypoints((prev) => [...prev, ll])
+            showPlaceControls={mode === 'od'}
+            placeMode={placeMode}
+            onPlaceModeChange={setPlaceMode}
+            onMapPlace={(role, ll) => {
+              void handleMapPlace(role, ll)
             }}
             focus={focusLocation}
             fitRevision={fitRevision}
           />
+          {placing && (
+            <div className="place-status" aria-live="polite">
+              장소 검색 중…
+            </div>
+          )}
           {route?.source === 'kakao' &&
             (route.trafficSegments?.length ?? 0) > 0 && (
               <div className="traffic-legend" aria-label="교통 상태 범례">

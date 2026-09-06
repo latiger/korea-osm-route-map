@@ -8,6 +8,8 @@ import { defineConfig, loadEnv } from 'vite'
  *
  * - /api/kakao/address → https://dapi.kakao.com/v2/local/search/address.json
  * - /api/kakao/keyword → https://dapi.kakao.com/v2/local/search/keyword.json
+ * - /api/kakao/coord2address → https://dapi.kakao.com/v2/local/geo/coord2address.json
+ * - /api/kakao/category → https://dapi.kakao.com/v2/local/search/category.json
  * - /api/kakao/navi/directions → https://apis-navi.kakaomobility.com/v1/directions
  *
  * Injects Authorization: KakaoAK … from server env only (never in browser bundle).
@@ -95,6 +97,24 @@ function kakaoProxyPlugin(restApiKey: string): Plugin {
           void proxyKakao(
             'https://dapi.kakao.com',
             '/v2/local/search/keyword.json',
+            req,
+            res,
+          )
+          return
+        }
+        if (url.startsWith('/api/kakao/coord2address')) {
+          void proxyKakao(
+            'https://dapi.kakao.com',
+            '/v2/local/geo/coord2address.json',
+            req,
+            res,
+          )
+          return
+        }
+        if (url.startsWith('/api/kakao/category')) {
+          void proxyKakao(
+            'https://dapi.kakao.com',
+            '/v2/local/search/category.json',
             req,
             res,
           )

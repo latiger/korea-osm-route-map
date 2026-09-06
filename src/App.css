@@ -633,3 +633,156 @@ button.danger {
 .chain-action-replace {
   color: var(--muted) !important;
 }
+
+
+/* ── OD one-line row (출발 / swap / 도착 / +) ── */
+.od-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.od-field {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.icon-btn {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  margin-top: 22px;
+  border-radius: 10px;
+  border: 1px solid #475569;
+  background: #0f172a;
+  color: var(--text);
+  font-size: 1.15rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.icon-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: #1e3a5f;
+}
+
+.icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.od-swap {
+  font-size: 1.25rem;
+}
+
+.od-add-via {
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.via-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.via-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.via-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.via-remove {
+  margin-top: 22px;
+  color: var(--danger);
+}
+
+.via-remove:hover:not(:disabled) {
+  background: #3f1d1d;
+  border-color: var(--danger);
+}
+
+/* ── Map place-mode control (under Leaflet zoom) ── */
+.place-mode-control {
+  margin-top: 8px !important;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.place-mode-control a.place-mode-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 52px;
+  height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: 'Pretendard', 'Noto Sans KR', system-ui, sans-serif;
+  color: #1e293b !important;
+  background: #fff;
+  text-decoration: none;
+  border-bottom: 1px solid #ccc;
+  letter-spacing: -0.02em;
+}
+
+.place-mode-control a.place-mode-btn:last-child {
+  border-bottom: 0;
+}
+
+.place-mode-control a.place-mode-btn:hover {
+  background: #f1f5f9;
+}
+
+.place-mode-control a.place-mode-btn.active {
+  background: #2563eb;
+  color: #fff !important;
+}
+
+.map-canvas.placing {
+  cursor: crosshair;
+}
+
+.map-canvas.placing .leaflet-container,
+.leaflet-container.placing {
+  cursor: crosshair;
+}
+
+/* Leaflet applies cursor on container; class is on MapContainer root */
+.leaflet-container.placing,
+.map-canvas.placing.leaflet-container {
+  cursor: crosshair !important;
+}
+
+.place-status {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid #475569;
+  background: rgba(30, 41, 59, 0.92);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}

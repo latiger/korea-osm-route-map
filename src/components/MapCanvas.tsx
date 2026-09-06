@@ -10,7 +10,8 @@ import {
 } from 'react-leaflet'
 import L from 'leaflet'
 import { trafficStateColor } from '../api/kakaoNavi'
-import type { LatLng, RouteSegment } from '../types'
+import type { LatLng, PlaceMode, RouteSegment } from '../types'
+
 export const SEOUL_CENTER: LatLng = { lat: 37.5665, lng: 126.978 }
 export const DEFAULT_ZOOM = 12
 
@@ -42,18 +43,20 @@ function markerIconForKey(key: string, index: number) {
   const role = roleFromKey(key)
   if (role === 'start') return badgeIcon('start', '출발')
   if (role === 'end') return badgeIcon('end', '도착')
-  // Junction / via: numbered neutral badge
-  const n = key.startsWith('chain-junction-')
-    ? Number(key.slice('chain-junction-'.length)) + 1
-    : index + 1
-  return badgeIcon('via', String(Number.isFinite(n) && n > 0 ? n : index + 1))
-}
-
-/** Waypoints: first=출발, last=도착, middle=numbered */
-function waypointIcon(index: number, total: number) {
-  if (total === 1) return badgeIcon('start', '출발')
-  if (index === 0) return badgeIcon('start', '출발')
-  if (index === total - 1) return badgeIcon('end', '도착')
+  if (key.startsWith('via-')) {
+    const n = Number(key.slice('via-'.length)) + 1
+    return badgeIcon(
+      'via',
+      String(Number.isFinite(n) && n > 0 ? n : index + 1),
+    )
+  }
+  if (key.startsWith('chain-junction-')) {
+    const n = Number(key.slice('chain-junction-'.length)) + 1
+    return badgeIcon(
+      'via',
+      String(Number.isFinite(n) && n > 0 ? n : index + 1),
+    )
+  }
   return badgeIcon('via', String(index + 1))
 }
 
@@ -64,11 +67,9 @@ function FitBounds({
 }: {
   points: LatLng[]
   route: LatLng[]
-  /** Bump to re-run fitBounds (e.g. restore full route after step focus) */
   fitRevision?: number
 }) {
   const map = useMap()
-  // Content key so new array refs on focus re-renders do not re-fit (and undo FlyTo)
   const key = JSON.stringify([
     points.map((p) => [p.lat, p.lng]),
     route.map((p) => [p.lat, p.lng]),
@@ -80,9 +81,11 @@ function FitBounds({
       map.setView([all[0].lat, all[0].lng], 14)
       return
     }
-    const bounds = L.latLngBounds(all.map((p) => [p.lat, p.lng] as [number, number]))
+    const bounds = L.latLngBounds(
+      all.map((p) => [p.lat, p.lng] as [number, number]),
+    )
     map.fitBounds(bounds, { padding: [48, 48], maxZoom: 16 })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- points/route via key; fitRevision forces re-fit
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, key, fitRevision])
   return null
 }
@@ -119,9 +122,83 @@ function ClickHandler({
   return null
 }
 
+/** Leaflet control: 출발 / 도착 / 경유지 place-mode toggles under zoom. */
+function PlaceModeControl({
+  visible,
+  placeMode,
+  onPlaceModeChange,
+}: {
+  visible: boolean
+  placeMode: PlaceMode | null
+  onPlaceModeChange: (mode: PlaceMode | null) => void
+}) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (!visible) {
+      map.getContainer().classList.remove('placing')
+      return
+    }
+
+    const control = new (L.Control.extend({
+      options: { position: 'topleft' as L.ControlPosition },
+      onAdd() {
+        const wrap = L.DomUtil.create(
+          'div',
+          'leaflet-bar place-mode-control',
+        )
+        L.DomEvent.disableClickPropagation(wrap)
+        L.DomEvent.disableScrollPropagation(wrap)
+
+        const roles: { role: PlaceMode; label: string }[] = [
+          { role: 'origin', label: '출발' },
+          { role: 'dest', label: '도착' },
+          { role: 'via', label: '경유지' },
+        ]
+
+        for (const { role, label } of roles) {
+          const btn = L.DomUtil.create(
+            'a',
+            `place-mode-btn${placeMode === role ? ' active' : ''}`,
+            wrap,
+          ) as HTMLAnchorElement
+          btn.href = '#'
+          btn.role = 'button'
+          btn.title = `${label} 지도에서 지정`
+          btn.setAttribute('aria-label', `${label} 지도에서 지정`)
+          btn.setAttribute('aria-pressed', placeMode === role ? 'true' : 'false')
+          btn.textContent = label
+          L.DomEvent.on(btn, 'click', (ev) => {
+            L.DomEvent.preventDefault(ev)
+            L.DomEvent.stopPropagation(ev)
+            onPlaceModeChange(placeMode === role ? null : role)
+          })
+        }
+
+        return wrap
+      },
+    }))()
+
+    map.addControl(control)
+    return () => {
+      map.removeControl(control)
+    }
+  }, [map, visible, placeMode, onPlaceModeChange])
+
+  useEffect(() => {
+    const el = map.getContainer()
+    if (visible && placeMode) el.classList.add('placing')
+    else el.classList.remove('placing')
+    return () => {
+      el.classList.remove('placing')
+    }
+  }, [map, visible, placeMode])
+
+  return null
+}
+
 export interface MapCanvasProps {
   markers?: Array<LatLng & { key: string; label?: string }>
-  waypoints?: LatLng[]
   /** Single polyline (OSRM / fallback) */
   route?: LatLng[]
   /**
@@ -131,8 +208,12 @@ export interface MapCanvasProps {
   routeLineStrings?: LatLng[][]
   /** Kakao traffic-colored road segments (preferred when present) */
   trafficSegments?: RouteSegment[]
-  clickToAddWaypoints?: boolean
-  onMapClick?: (ll: LatLng) => void
+  /** When set, map clicks place OD points (keep armed until toggled off) */
+  placeMode?: PlaceMode | null
+  onPlaceModeChange?: (mode: PlaceMode | null) => void
+  /** Show place-mode toolbar (od mode only) */
+  showPlaceControls?: boolean
+  onMapPlace?: (role: PlaceMode, ll: LatLng) => void
   /** Pan/zoom target from route-step click */
   focus?: LatLng | null
   /** Bump to re-run FitBounds (restore full-route view) */
@@ -141,12 +222,13 @@ export interface MapCanvasProps {
 
 export function MapCanvas({
   markers = [],
-  waypoints = [],
   route = [],
   routeLineStrings,
   trafficSegments,
-  clickToAddWaypoints = false,
-  onMapClick,
+  placeMode = null,
+  onPlaceModeChange,
+  showPlaceControls = false,
+  onMapPlace,
   focus = null,
   fitRevision = 0,
 }: MapCanvasProps) {
@@ -158,18 +240,12 @@ export function MapCanvas({
     return () => window.clearTimeout(t)
   }, [highlight])
 
-  const fitPoints = [
-    ...markers.map((m) => ({ lat: m.lat, lng: m.lng })),
-    ...waypoints,
-  ]
+  const fitPoints = markers.map((m) => ({ lat: m.lat, lng: m.lng }))
 
   const traffic =
     trafficSegments?.filter((s) => s.coordinates.length > 1) ?? []
   const useTraffic = traffic.length > 0
-  const multi =
-    routeLineStrings?.filter((line) => line.length > 1) ?? []
-  // Draw lineStrings even when trafficSegments exist (chained official roads
-  // + Kakao connectors). Previously traffic hid multi-polylines.
+  const multi = routeLineStrings?.filter((line) => line.length > 1) ?? []
   const useMulti = multi.length > 0
   const fitRoute = [
     ...(useTraffic ? traffic.flatMap((s) => s.coordinates) : []),
@@ -188,9 +264,17 @@ export function MapCanvas({
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      <PlaceModeControl
+        visible={showPlaceControls}
+        placeMode={placeMode}
+        onPlaceModeChange={(m) => onPlaceModeChange?.(m)}
+      />
       <ClickHandler
-        enabled={clickToAddWaypoints}
-        onClick={(ll) => onMapClick?.(ll)}
+        enabled={showPlaceControls && placeMode != null}
+        onClick={(ll) => {
+          if (!placeMode) return
+          onMapPlace?.(placeMode, ll)
+        }}
       />
       <FitBounds points={fitPoints} route={fitRoute} fitRevision={fitRevision} />
       <FlyTo focus={focus} onFlew={setHighlight} />
@@ -200,13 +284,6 @@ export function MapCanvas({
           position={[m.lat, m.lng]}
           title={m.label}
           icon={markerIconForKey(m.key, i)}
-        />
-      ))}
-      {waypoints.map((w, i) => (
-        <Marker
-          key={`wp-${i}-${w.lat}-${w.lng}`}
-          position={[w.lat, w.lng]}
-          icon={waypointIcon(i, waypoints.length)}
         />
       ))}
       {highlight && (

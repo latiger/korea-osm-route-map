@@ -31,6 +31,9 @@ export function RouteSummary({ route, onStepClick }: Props) {
         {route.fromOfficialGeometry && (
           <span className="hint muted">official centerline geometry</span>
         )}
+        {route.source === 'kakao' && (
+          <span className="hint muted">교통 반영 (카카오내비)</span>
+        )}
         {list.length > 0 && (
           <button
             type="button"

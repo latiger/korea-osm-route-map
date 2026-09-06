@@ -288,6 +288,7 @@ export function routeFromOfficialGeometry(match: RoadMatch): RouteResult | null 
     durationSeconds,
     steps,
     fromOfficialGeometry: true,
+    source: 'official',
   }
 }
 

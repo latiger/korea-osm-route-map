@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { fetchRoute } from '../api/osrm'
+import { fetchRoute } from '../api/route'
 import type { LatLng, RouteResult, TravelProfile } from '../types'
 import { ProfileToggle } from './ProfileToggle'
 import { RouteSummary } from './RouteSummary'
@@ -65,8 +65,8 @@ export function WaypointsPanel({
       <div className="stack">
         <ProfileToggle value={profile} onChange={onProfileChange} disabled={loading} />
         <p className="hint">
-          지도를 클릭해 경유점을 순서대로 추가하세요. OSRM이 순서대로 도로
-          경로를 연결합니다.
+          지도를 클릭해 경유점을 순서대로 추가하세요. 자동차는 카카오내비(교통
+          반영, 경유 최대 5)·보행/실패 시 OSRM으로 연결합니다.
         </p>
         <p className="meta">
           경유점 <strong>{waypoints.length}</strong>개

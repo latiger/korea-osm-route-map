@@ -9,7 +9,8 @@ import {
   useMapEvents,
 } from 'react-leaflet'
 import L from 'leaflet'
-import type { LatLng } from '../types'
+import { trafficStateColor } from '../api/kakaoNavi'
+import type { LatLng, RouteSegment } from '../types'
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
@@ -30,6 +31,7 @@ export const SEOUL_CENTER: LatLng = { lat: 37.5665, lng: 126.978 }
 export const DEFAULT_ZOOM = 12
 
 const ROUTE_STYLE = { color: '#2563eb', weight: 5, opacity: 0.85 }
+const TRAFFIC_WEIGHT = 6
 const FOCUS_ZOOM = 18
 
 const waypointIcon = (n: number) =>
@@ -109,9 +111,11 @@ export interface MapCanvasProps {
   route?: LatLng[]
   /**
    * Official MultiLineString roads: draw each entry as its own Polyline.
-   * When present and non-empty, preferred over `route`.
+   * When present and non-empty, preferred over `route` unless trafficSegments set.
    */
   routeLineStrings?: LatLng[][]
+  /** Kakao traffic-colored road segments (preferred when present) */
+  trafficSegments?: RouteSegment[]
   clickToAddWaypoints?: boolean
   onMapClick?: (ll: LatLng) => void
   /** Pan/zoom target from route-step click */
@@ -125,6 +129,7 @@ export function MapCanvas({
   waypoints = [],
   route = [],
   routeLineStrings,
+  trafficSegments,
   clickToAddWaypoints = false,
   onMapClick,
   focus = null,
@@ -143,10 +148,17 @@ export function MapCanvas({
     ...waypoints,
   ]
 
+  const traffic =
+    trafficSegments?.filter((s) => s.coordinates.length > 1) ?? []
+  const useTraffic = traffic.length > 0
   const multi =
     routeLineStrings?.filter((line) => line.length > 1) ?? []
-  const useMulti = multi.length > 0
-  const fitRoute = useMulti ? multi.flat() : route
+  const useMulti = !useTraffic && multi.length > 0
+  const fitRoute = useTraffic
+    ? traffic.flatMap((s) => s.coordinates)
+    : useMulti
+      ? multi.flat()
+      : route
 
   return (
     <MapContainer
@@ -187,20 +199,36 @@ export function MapCanvas({
           }}
         />
       )}
-      {useMulti
-        ? multi.map((line, i) => (
+      {useTraffic
+        ? traffic.map((seg, i) => (
             <Polyline
-              key={`route-line-${i}`}
-              positions={line.map((p) => [p.lat, p.lng] as [number, number])}
-              pathOptions={ROUTE_STYLE}
+              key={`traffic-seg-${i}`}
+              positions={seg.coordinates.map(
+                (p) => [p.lat, p.lng] as [number, number],
+              )}
+              pathOptions={{
+                color: trafficStateColor(seg.trafficState),
+                weight: TRAFFIC_WEIGHT,
+                opacity: 0.9,
+                lineCap: 'round',
+                lineJoin: 'round',
+              }}
             />
           ))
-        : route.length > 1 && (
-            <Polyline
-              positions={route.map((p) => [p.lat, p.lng] as [number, number])}
-              pathOptions={ROUTE_STYLE}
-            />
-          )}
+        : useMulti
+          ? multi.map((line, i) => (
+              <Polyline
+                key={`route-line-${i}`}
+                positions={line.map((p) => [p.lat, p.lng] as [number, number])}
+                pathOptions={ROUTE_STYLE}
+              />
+            ))
+          : route.length > 1 && (
+              <Polyline
+                positions={route.map((p) => [p.lat, p.lng] as [number, number])}
+                pathOptions={ROUTE_STYLE}
+              />
+            )}
     </MapContainer>
   )
 }

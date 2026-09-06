@@ -68,4 +68,17 @@ export interface RouteResult {
   steps: RouteStep[]
   /** When drawn from official centerline rather than OSRM */
   fromOfficialGeometry?: boolean
+  /** Kakao Navi per-road segments colored by traffic_state */
+  trafficSegments?: RouteSegment[]
+  /** Routing / geometry provenance */
+  source?: 'kakao' | 'osrm' | 'official'
+}
+
+export type TrafficState = 0 | 1 | 2 | 3 | 4 | 6
+
+export interface RouteSegment {
+  coordinates: LatLng[]
+  trafficState: number
+  trafficSpeed?: number
+  name?: string
 }

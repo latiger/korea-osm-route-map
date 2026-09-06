@@ -192,6 +192,7 @@ export async function fetchRoute(
       lng,
     })),
     steps: parseSteps(route.legs),
+    source: 'osrm',
   }
 }
 

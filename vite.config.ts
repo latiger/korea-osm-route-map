@@ -4,17 +4,19 @@ import type { Plugin } from 'vite'
 import { defineConfig, loadEnv } from 'vite'
 
 /**
- * Dev proxy for Kakao Local API (primary geocoding).
+ * Dev proxy for Kakao Local + Navi APIs.
  *
  * - /api/kakao/address → https://dapi.kakao.com/v2/local/search/address.json
  * - /api/kakao/keyword → https://dapi.kakao.com/v2/local/search/keyword.json
+ * - /api/kakao/navi/directions → https://apis-navi.kakaomobility.com/v1/directions
  *
  * Injects Authorization: KakaoAK … from server env only (never in browser bundle).
  * Prefer KAKAO_REST_API_KEY; VITE_KAKAO_REST_API_KEY accepted as legacy migration.
- * Without a key, responds 503 so the client can fall back to Nominatim.
+ * Without a key, responds 503 so the client can fall back (Nominatim / OSRM).
  */
 function kakaoProxyPlugin(restApiKey: string): Plugin {
   async function proxyKakao(
+    baseOrigin: string,
     upstreamPath: string,
     req: IncomingMessage,
     res: ServerResponse,
@@ -33,7 +35,7 @@ function kakaoProxyPlugin(restApiKey: string): Plugin {
     }
 
     const incoming = new URL(req.url ?? '/', 'http://localhost')
-    const target = new URL(upstreamPath, 'https://dapi.kakao.com')
+    const target = new URL(upstreamPath, baseOrigin)
     incoming.searchParams.forEach((v, k) => {
       target.searchParams.set(k, v)
     })
@@ -71,12 +73,31 @@ function kakaoProxyPlugin(restApiKey: string): Plugin {
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const url = req.url ?? ''
+        if (url.startsWith('/api/kakao/navi/directions')) {
+          void proxyKakao(
+            'https://apis-navi.kakaomobility.com',
+            '/v1/directions',
+            req,
+            res,
+          )
+          return
+        }
         if (url.startsWith('/api/kakao/address')) {
-          void proxyKakao('/v2/local/search/address.json', req, res)
+          void proxyKakao(
+            'https://dapi.kakao.com',
+            '/v2/local/search/address.json',
+            req,
+            res,
+          )
           return
         }
         if (url.startsWith('/api/kakao/keyword')) {
-          void proxyKakao('/v2/local/search/keyword.json', req, res)
+          void proxyKakao(
+            'https://dapi.kakao.com',
+            '/v2/local/search/keyword.json',
+            req,
+            res,
+          )
           return
         }
         next()

@@ -92,6 +92,7 @@ function App() {
             waypoints={mode === 'waypoints' ? waypoints : []}
             route={route?.coordinates ?? []}
             routeLineStrings={route?.lineStrings}
+            trafficSegments={route?.trafficSegments}
             clickToAddWaypoints={mode === 'waypoints'}
             onMapClick={(ll) => {
               if (mode !== 'waypoints') return
@@ -100,6 +101,24 @@ function App() {
             focus={focusLocation}
             fitRevision={fitRevision}
           />
+          {route?.source === 'kakao' &&
+            (route.trafficSegments?.length ?? 0) > 0 && (
+              <div className="traffic-legend" aria-label="교통 상태 범례">
+                <span className="traffic-legend-title">교통</span>
+                <span className="traffic-swatch" data-state="4">
+                  원활
+                </span>
+                <span className="traffic-swatch" data-state="3">
+                  서행
+                </span>
+                <span className="traffic-swatch" data-state="2">
+                  지체
+                </span>
+                <span className="traffic-swatch" data-state="1">
+                  정체
+                </span>
+              </div>
+            )}
           {focusLocation != null && (
             <button
               type="button"

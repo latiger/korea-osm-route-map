@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   MapContainer,
   TileLayer,
@@ -133,12 +133,27 @@ function PlaceModeControl({
   onPlaceModeChange: (mode: PlaceMode | null) => void
 }) {
   const map = useMap()
+  const placeModeRef = useRef(placeMode)
+  const onChangeRef = useRef(onPlaceModeChange)
+  const buttonsRef = useRef<Partial<Record<PlaceMode, HTMLAnchorElement>>>({})
 
+  placeModeRef.current = placeMode
+  onChangeRef.current = onPlaceModeChange
+
+  // Create/add the control once when visible — do not remount on placeMode changes.
   useEffect(() => {
     if (!visible) {
       map.getContainer().classList.remove('placing')
+      buttonsRef.current = {}
       return
     }
+
+    const roles: { role: PlaceMode; label: string }[] = [
+      { role: 'origin', label: '출발' },
+      { role: 'dest', label: '도착' },
+      { role: 'via', label: '경유지' },
+    ]
+    const buttons: Partial<Record<PlaceMode, HTMLAnchorElement>> = {}
 
     const control = new (L.Control.extend({
       options: { position: 'topleft' as L.ControlPosition },
@@ -150,29 +165,22 @@ function PlaceModeControl({
         L.DomEvent.disableClickPropagation(wrap)
         L.DomEvent.disableScrollPropagation(wrap)
 
-        const roles: { role: PlaceMode; label: string }[] = [
-          { role: 'origin', label: '출발' },
-          { role: 'dest', label: '도착' },
-          { role: 'via', label: '경유지' },
-        ]
-
         for (const { role, label } of roles) {
-          const btn = L.DomUtil.create(
-            'a',
-            `place-mode-btn${placeMode === role ? ' active' : ''}`,
-            wrap,
-          ) as HTMLAnchorElement
+          const btn = L.DomUtil.create('a', 'place-mode-btn', wrap) as HTMLAnchorElement
           btn.href = '#'
           btn.role = 'button'
           btn.title = `${label} 지도에서 지정`
           btn.setAttribute('aria-label', `${label} 지도에서 지정`)
-          btn.setAttribute('aria-pressed', placeMode === role ? 'true' : 'false')
+          btn.setAttribute('aria-pressed', 'false')
+          btn.dataset.role = role
           btn.textContent = label
           L.DomEvent.on(btn, 'click', (ev) => {
             L.DomEvent.preventDefault(ev)
             L.DomEvent.stopPropagation(ev)
-            onPlaceModeChange(placeMode === role ? null : role)
+            const current = placeModeRef.current
+            onChangeRef.current(current === role ? null : role)
           })
+          buttons[role] = btn
         }
 
         return wrap
@@ -180,10 +188,35 @@ function PlaceModeControl({
     }))()
 
     map.addControl(control)
+    buttonsRef.current = buttons
+
+    // Sync active state for current placeMode after mount
+    const current = placeModeRef.current
+    for (const { role } of roles) {
+      const btn = buttons[role]
+      if (!btn) continue
+      const active = current === role
+      btn.classList.toggle('active', active)
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false')
+    }
+
     return () => {
       map.removeControl(control)
+      buttonsRef.current = {}
     }
-  }, [map, visible, placeMode, onPlaceModeChange])
+  }, [map, visible])
+
+  // Update .active / aria-pressed when placeMode changes — without remounting control.
+  useEffect(() => {
+    const buttons = buttonsRef.current
+    for (const role of ['origin', 'dest', 'via'] as PlaceMode[]) {
+      const btn = buttons[role]
+      if (!btn) continue
+      const active = placeMode === role
+      btn.classList.toggle('active', active)
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false')
+    }
+  }, [placeMode])
 
   useEffect(() => {
     const el = map.getContainer()

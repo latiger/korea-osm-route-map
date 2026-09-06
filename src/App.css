@@ -657,6 +657,15 @@ button.danger {
   min-height: 40px;
 }
 
+.kakao-od-row.active .kakao-od-input {
+  outline: 2px solid #2563eb;
+  background: #eff6ff;
+}
+
+.kakao-od-row.active .kakao-od-dot {
+  box-shadow: 0 0 0 3px #dbeafe;
+}
+
 .kakao-od-spine {
   position: relative;
   display: flex;

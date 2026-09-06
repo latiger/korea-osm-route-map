@@ -98,6 +98,7 @@ function App() {
               onRouteChange={onRouteChange}
               onFocusLocation={onFocusLocation}
               mapPick={mapPick}
+              placeMode={placeMode}
             />
           )}
           {mode === 'road' && (

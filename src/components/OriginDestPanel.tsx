@@ -38,6 +38,8 @@ interface Props {
   onFocusLocation?: (ll: LatLng) => void
   /** Map place-mode pick after reverse-geocode (App → panel) */
   mapPick?: MapResolvedPick | null
+  /** Armed map place-mode (출발/도착/경유) for row highlight */
+  placeMode?: PlaceMode | null
 }
 
 const AMBIGUOUS_HINT = '동명이 여러 곳입니다. 목록에서 선택해 주세요.'
@@ -53,6 +55,7 @@ export function OriginDestPanel({
   onRouteChange,
   onFocusLocation,
   mapPick = null,
+  placeMode = null,
 }: Props) {
   const [originText, setOriginText] = useState('서울역')
   const [destText, setDestText] = useState('광화문')
@@ -436,7 +439,9 @@ export function OriginDestPanel({
         <div className="kakao-od">
           <div className="kakao-od-rows">
             {/* 출발 */}
-            <div className="kakao-od-place">
+            <div
+              className={`kakao-od-place kakao-od-row${placeMode === 'origin' ? ' active' : ''}`}
+            >
               <div className="kakao-od-spine">
                 <span className="kakao-od-dot origin" aria-hidden />
                 <span className="kakao-od-rail" aria-hidden />
@@ -509,7 +514,10 @@ export function OriginDestPanel({
             {vias.map((v, i) => {
               const showSuggest = v.hits.length > 0 && !v.place
               return (
-                <div key={v.id} className="kakao-od-place kakao-od-via">
+                <div
+                  key={v.id}
+                  className={`kakao-od-place kakao-od-via kakao-od-row${placeMode === 'via' ? ' active' : ''}`}
+                >
                   <div className="kakao-od-spine">
                     <span className="kakao-od-dot via" aria-hidden />
                     <span className="kakao-od-rail" aria-hidden />
@@ -576,7 +584,9 @@ export function OriginDestPanel({
             })}
 
             {/* 도착 */}
-            <div className="kakao-od-place kakao-od-dest">
+            <div
+              className={`kakao-od-place kakao-od-dest kakao-od-row${placeMode === 'dest' ? ' active' : ''}`}
+            >
               <div className="kakao-od-spine">
                 <span className="kakao-od-dot dest" aria-hidden />
               </div>

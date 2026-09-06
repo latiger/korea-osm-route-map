@@ -34,7 +34,10 @@ function App() {
     (m: Array<LatLng & { key: string; label?: string }>) => setMarkers(m),
     [],
   )
-  const onRouteChange = useCallback((r: RouteResult | null) => setRoute(r), [])
+  const onRouteChange = useCallback((r: RouteResult | null) => {
+    setRoute(r)
+    if (r == null) setFocusLocation(null)
+  }, [])
   const onFocusLocation = useCallback((ll: LatLng) => {
     setFocusLocation({ lat: ll.lat, lng: ll.lng })
   }, [])

@@ -356,6 +356,14 @@ export function OriginDestPanel({
     return { place: null, hits, needPick: true }
   }
 
+  function clearRoute() {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setRoute(null)
+    setError(null)
+    setLoading(false)
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
@@ -630,6 +638,16 @@ export function OriginDestPanel({
         <button type="submit" className="primary" disabled={loading}>
           {loading ? '경로 계산 중…' : '경로 찾기'}
         </button>
+        {route != null && (
+          <button
+            type="button"
+            className="danger-outline"
+            onClick={clearRoute}
+            disabled={loading}
+          >
+            경로지우기
+          </button>
+        )}
       </form>
       {error && <p className="error">{error}</p>}
       <RouteSummary route={route} onStepClick={onFocusLocation} />

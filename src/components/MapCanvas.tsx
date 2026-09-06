@@ -75,14 +75,18 @@ function FitBounds({
     route.map((p) => [p.lat, p.lng]),
   ])
   useEffect(() => {
-    const all = [...points, ...route]
-    if (all.length === 0) return
-    if (all.length === 1) {
-      map.setView([all[0].lat, all[0].lng], 14)
+    // Prefer real route geometry; otherwise fit only when ≥2 markers.
+    // Single OD point must not zoom/pan (setView / fitBounds).
+    let toFit: LatLng[]
+    if (route.length >= 2) {
+      toFit = [...route, ...points]
+    } else if (points.length >= 2) {
+      toFit = points
+    } else {
       return
     }
     const bounds = L.latLngBounds(
-      all.map((p) => [p.lat, p.lng] as [number, number]),
+      toFit.map((p) => [p.lat, p.lng] as [number, number]),
     )
     map.fitBounds(bounds, { padding: [48, 48], maxZoom: 16 })
     // eslint-disable-next-line react-hooks/exhaustive-deps

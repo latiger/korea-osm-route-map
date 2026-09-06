@@ -91,6 +91,19 @@ button.danger {
   border-color: #991b1b;
 }
 
+button.danger-outline {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--danger);
+  background: transparent;
+  color: var(--danger);
+}
+
+button.danger-outline:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: #3f1d1d;
+}
+
 .layout {
   display: grid;
   grid-template-columns: minmax(280px, 360px) 1fr;

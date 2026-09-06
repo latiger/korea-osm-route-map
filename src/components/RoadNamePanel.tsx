@@ -121,6 +121,14 @@ export function RoadNamePanel({
     applyChain([])
   }
 
+  function clearRoute() {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setRoute(null)
+    setError(null)
+    setLoading(false)
+  }
+
   async function handleSearch(e: FormEvent) {
     e.preventDefault()
     setError(null)
@@ -261,6 +269,16 @@ export function RoadNamePanel({
         <button type="submit" className="primary" disabled={loading}>
           {loading ? '검색 중…' : '도로 검색 · 경로'}
         </button>
+        {route != null && (
+          <button
+            type="button"
+            className="danger-outline"
+            onClick={clearRoute}
+            disabled={loading}
+          >
+            경로지우기
+          </button>
+        )}
       </form>
 
       {chain.length > 0 && (

@@ -7,6 +7,25 @@ const USER_AGENT =
 /** Korea bounding box: west,south,east,north */
 const KOREA_VIEWBOX = '124.5,33.0,132.0,43.0'
 
+function mapResults(
+  data: Array<{
+    place_id: number
+    display_name: string
+    lat: string
+    lon: string
+    type?: string
+    class?: string
+  }>,
+): GeocodeResult[] {
+  return data.map((item) => ({
+    id: String(item.place_id),
+    label: item.display_name,
+    lat: Number(item.lat),
+    lng: Number(item.lon),
+    type: item.type ?? item.class,
+  }))
+}
+
 export async function geocodeKorea(
   query: string,
   signal?: AbortSignal,
@@ -45,13 +64,7 @@ export async function geocodeKorea(
     class?: string
   }>
 
-  return data.map((item) => ({
-    id: String(item.place_id),
-    label: item.display_name,
-    lat: Number(item.lat),
-    lng: Number(item.lon),
-    type: item.type ?? item.class,
-  }))
+  return mapResults(data)
 }
 
 export async function searchRoadsNominatim(
@@ -61,7 +74,7 @@ export async function searchRoadsNominatim(
   const q = roadName.trim()
   if (!q) return []
 
-  const params = new URLSearchParams({
+  const streetParams = new URLSearchParams({
     street: q,
     country: 'South Korea',
     format: 'json',
@@ -70,7 +83,7 @@ export async function searchRoadsNominatim(
     countrycodes: 'kr',
   })
 
-  const res = await fetch(`${NOMINATIM}/search?${params}`, {
+  const streetRes = await fetch(`${NOMINATIM}/search?${streetParams}`, {
     signal,
     headers: {
       Accept: 'application/json',
@@ -78,11 +91,11 @@ export async function searchRoadsNominatim(
     },
   })
 
-  if (!res.ok) {
-    throw new Error(`도로명 검색 실패 (${res.status})`)
+  if (!streetRes.ok) {
+    throw new Error(`도로명 검색 실패 (${streetRes.status})`)
   }
 
-  const data = (await res.json()) as Array<{
+  const streetData = (await streetRes.json()) as Array<{
     place_id: number
     display_name: string
     lat: string
@@ -91,11 +104,40 @@ export async function searchRoadsNominatim(
     class?: string
   }>
 
-  return data.map((item) => ({
-    id: String(item.place_id),
-    label: item.display_name,
-    lat: Number(item.lat),
-    lng: Number(item.lon),
-    type: item.type ?? item.class,
-  }))
+  const streetResults = mapResults(streetData)
+  if (streetResults.length > 0) return streetResults
+
+  // Secondary fallback: free-text q= (better for 국도/고속도로 / named highways)
+  const freeParams = new URLSearchParams({
+    q: `${q}, South Korea`,
+    format: 'json',
+    addressdetails: '1',
+    limit: '10',
+    countrycodes: 'kr',
+    viewbox: KOREA_VIEWBOX,
+    bounded: '0',
+  })
+
+  const freeRes = await fetch(`${NOMINATIM}/search?${freeParams}`, {
+    signal,
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': USER_AGENT,
+    },
+  })
+
+  if (!freeRes.ok) {
+    throw new Error(`도로명 검색 실패 (${freeRes.status})`)
+  }
+
+  const freeData = (await freeRes.json()) as Array<{
+    place_id: number
+    display_name: string
+    lat: string
+    lon: string
+    type?: string
+    class?: string
+  }>
+
+  return mapResults(freeData)
 }

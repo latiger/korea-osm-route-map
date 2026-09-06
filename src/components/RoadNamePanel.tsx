@@ -103,7 +103,7 @@ export function RoadNamePanel({
       const nom = await searchRoadsNominatim(name)
       if (!nom.length) {
         throw new Error(
-          '해당 도로명을 찾지 못했습니다. 다른 이름(예: 세종대로)으로 시도해 보세요.',
+          '해당 도로를 찾지 못했습니다. 국도·고속도로(예: 2번국도, 경부고속도로)나 도로명(예: 세종대로)으로 다시 시도해 보세요.',
         )
       }
 
@@ -139,7 +139,7 @@ export function RoadNamePanel({
           <input
             value={roadText}
             onChange={(e) => setRoadText(e.target.value)}
-            placeholder="예: 테헤란로, 세종대로"
+            placeholder="예: 2번국도, 경부고속도로, 테헤란로"
             autoComplete="off"
           />
         </label>
@@ -171,8 +171,10 @@ export function RoadNamePanel({
       {error && <p className="error">{error}</p>}
       <RouteSummary route={route} />
       <p className="hint muted">
-        Overpass로 도로 geometry를 찾고, 도로의 시작·끝 지점을 OSRM으로
-        연결합니다. 긴 도로는 구간별로 나뉠 수 있습니다.
+        Overpass로 OSM 도로(name·ref 등) geometry를 찾고, 구간의 시작·끝
+        지점을 OSRM으로 연결합니다. 국도·고속도로는 OSM에서 ref(예: ref=2)와
+        「국도 제N호선」 형태 name으로 태깅되어 있어, 「2번국도」처럼 검색해도
+        매칭됩니다. 긴 도로는 같은 ref/name끼리 묶어 표시합니다.
       </p>
     </div>
   )

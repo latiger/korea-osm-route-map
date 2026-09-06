@@ -111,7 +111,7 @@ export interface MapCanvasProps {
   route?: LatLng[]
   /**
    * Official MultiLineString roads: draw each entry as its own Polyline.
-   * When present and non-empty, preferred over `route` unless trafficSegments set.
+   * When present and non-empty, drawn as blue polylines (alongside trafficSegments).
    */
   routeLineStrings?: LatLng[][]
   /** Kakao traffic-colored road segments (preferred when present) */
@@ -153,12 +153,14 @@ export function MapCanvas({
   const useTraffic = traffic.length > 0
   const multi =
     routeLineStrings?.filter((line) => line.length > 1) ?? []
-  const useMulti = !useTraffic && multi.length > 0
-  const fitRoute = useTraffic
-    ? traffic.flatMap((s) => s.coordinates)
-    : useMulti
-      ? multi.flat()
-      : route
+  // Draw lineStrings even when trafficSegments exist (chained official roads
+  // + Kakao connectors). Previously traffic hid multi-polylines.
+  const useMulti = multi.length > 0
+  const fitRoute = [
+    ...(useTraffic ? traffic.flatMap((s) => s.coordinates) : []),
+    ...(useMulti ? multi.flat() : []),
+    ...(!useTraffic && !useMulti ? route : []),
+  ]
 
   return (
     <MapContainer
@@ -199,36 +201,36 @@ export function MapCanvas({
           }}
         />
       )}
-      {useTraffic
-        ? traffic.map((seg, i) => (
-            <Polyline
-              key={`traffic-seg-${i}`}
-              positions={seg.coordinates.map(
-                (p) => [p.lat, p.lng] as [number, number],
-              )}
-              pathOptions={{
-                color: trafficStateColor(seg.trafficState),
-                weight: TRAFFIC_WEIGHT,
-                opacity: 0.9,
-                lineCap: 'round',
-                lineJoin: 'round',
-              }}
-            />
-          ))
-        : useMulti
-          ? multi.map((line, i) => (
-              <Polyline
-                key={`route-line-${i}`}
-                positions={line.map((p) => [p.lat, p.lng] as [number, number])}
-                pathOptions={ROUTE_STYLE}
-              />
-            ))
-          : route.length > 1 && (
-              <Polyline
-                positions={route.map((p) => [p.lat, p.lng] as [number, number])}
-                pathOptions={ROUTE_STYLE}
-              />
+      {useMulti &&
+        multi.map((line, i) => (
+          <Polyline
+            key={`route-line-${i}`}
+            positions={line.map((p) => [p.lat, p.lng] as [number, number])}
+            pathOptions={ROUTE_STYLE}
+          />
+        ))}
+      {useTraffic &&
+        traffic.map((seg, i) => (
+          <Polyline
+            key={`traffic-seg-${i}`}
+            positions={seg.coordinates.map(
+              (p) => [p.lat, p.lng] as [number, number],
             )}
+            pathOptions={{
+              color: trafficStateColor(seg.trafficState),
+              weight: TRAFFIC_WEIGHT,
+              opacity: 0.9,
+              lineCap: 'round',
+              lineJoin: 'round',
+            }}
+          />
+        ))}
+      {!useTraffic && !useMulti && route.length > 1 && (
+        <Polyline
+          positions={route.map((p) => [p.lat, p.lng] as [number, number])}
+          pathOptions={ROUTE_STYLE}
+        />
+      )}
     </MapContainer>
   )
 }

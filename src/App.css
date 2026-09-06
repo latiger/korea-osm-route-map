@@ -466,3 +466,124 @@ button.danger {
 .traffic-swatch[data-state='3']::before { background: #eab308; }
 .traffic-swatch[data-state='2']::before { background: #f97316; }
 .traffic-swatch[data-state='1']::before { background: #ef4444; }
+
+/* ── 도로명 chain (multi-road) ── */
+.road-chain {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: var(--radius);
+}
+
+.road-chain-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.road-chain-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.road-chain-clear {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  border-radius: 999px;
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: var(--danger);
+}
+
+.road-chain-clear:hover {
+  border-color: var(--danger);
+  background: #3f1d1d;
+}
+
+.road-chain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.road-chain-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 4px 6px 4px 10px;
+  border-radius: 999px;
+  background: #1e3a5f;
+  border: 1px solid #334155;
+  font-size: 0.8rem;
+  line-height: 1.2;
+}
+
+.road-chain-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+
+.road-chain-remove {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.road-chain-remove:hover {
+  color: var(--danger);
+  background: rgba(248, 113, 113, 0.15);
+}
+
+.road-match-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.chain-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px 10px;
+  background: #0b1220;
+  border-top: 1px solid #1e293b;
+}
+
+.chain-action {
+  padding: 5px 10px !important;
+  font-size: 0.75rem !important;
+  border-radius: 999px !important;
+  border: 1px solid #475569 !important;
+  background: #1e293b !important;
+  color: var(--text) !important;
+  width: auto !important;
+  flex: 0 0 auto;
+}
+
+.chain-action:hover {
+  border-color: var(--accent) !important;
+  background: #1e3a5f !important;
+}
+
+.chain-action-replace {
+  color: var(--muted) !important;
+}

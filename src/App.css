@@ -613,6 +613,125 @@ button.danger-outline:hover:not(:disabled) {
   background: rgba(248, 113, 113, 0.15);
 }
 
+.road-chain-chip[draggable='true'] {
+  cursor: grab;
+  user-select: none;
+}
+
+.road-chain-chip.dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+
+.road-chain-chip.drag-over {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35);
+}
+
+.road-chain-drag-handle {
+  flex-shrink: 0;
+  color: #64748b;
+  font-size: 0.75rem;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+/* ── discontinuous gaps list ── */
+.gap-list {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: var(--radius);
+}
+
+.gap-list-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.gap-list-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gap-list-row {
+  margin: 0;
+}
+
+.gap-list-button,
+.gap-list-static {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: #1e293b;
+  color: var(--text);
+  text-align: left;
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+.gap-list-button {
+  cursor: pointer;
+}
+
+.gap-list-button:hover {
+  border-color: #475569;
+  background: #243447;
+}
+
+.gap-list-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gap-list-dist {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.gap-badge {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.gap-badge-routed {
+  background: rgba(34, 197, 94, 0.18);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+.gap-badge-straight {
+  background: rgba(234, 179, 8, 0.16);
+  color: #facc15;
+  border: 1px solid rgba(234, 179, 8, 0.35);
+}
+
+.gap-badge-skipped {
+  background: rgba(248, 113, 113, 0.14);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+}
+
 .road-match-item {
   display: flex;
   flex-direction: column;

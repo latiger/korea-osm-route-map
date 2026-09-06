@@ -1,4 +1,11 @@
-import type { LatLng, RoadMatch, RouteResult, RouteStep } from '../types'
+import type {
+  LatLng,
+  RoadMatch,
+  RouteGapInfo,
+  RouteResult,
+  RouteStep,
+  GapBridgeKind,
+} from '../types'
 import { parseRoadQuery } from './overpass'
 import { fetchRoute } from './route'
 
@@ -220,6 +227,24 @@ async function mapPool<T, R>(
   return results
 }
 
+function makeGapInfo(
+  index: number,
+  a: LatLng,
+  b: LatLng,
+  gapMeters: number,
+  kind: GapBridgeKind,
+  labelPrefix = '내부 끊김',
+): RouteGapInfo {
+  return {
+    id: `gap-${index}`,
+    label: labelPrefix,
+    from: a,
+    to: b,
+    gapMeters,
+    kind,
+  }
+}
+
 /**
  * Between consecutive oriented segments:
  * - ≤ ~90m: ignore
@@ -227,6 +252,7 @@ async function mapPool<T, R>(
  * - > 5km: skip (no connector — avoids bogus long jumps / distance bloat)
  * Remaining mid-size gaps after the API cap fall back to short straight dashes.
  * Official parts stay in `lineStrings`; bridges go to `connectorLineStrings`.
+ * Every gap > GAP_IGNORE_M is recorded in `gaps` (routed / straight / skipped).
  */
 export async function bridgeSegmentGaps(
   ordered: LatLng[][],
@@ -236,8 +262,11 @@ export async function bridgeSegmentGaps(
   connectorLineStrings: LatLng[][]
   connectorMeters: number
   routedConnectorCount: number
+  gaps: RouteGapInfo[]
 }> {
   const connectorByGap = new Map<number, LatLng[]>()
+  const kindByGap = new Map<number, GapBridgeKind>()
+  const metaByGap = new Map<number, { a: LatLng; b: LatLng; gapMeters: number }>()
   let connectorMeters = 0
   let routedConnectorCount = 0
 
@@ -250,7 +279,11 @@ export async function bridgeSegmentGaps(
     const b = next[0]
     const gapMeters = haversineMeters(a, b)
     if (gapMeters <= GAP_IGNORE_M) continue
-    if (gapMeters > GAP_ROUTE_MAX_M) continue // prefer skip for long gaps
+    metaByGap.set(i, { a, b, gapMeters })
+    if (gapMeters > GAP_ROUTE_MAX_M) {
+      kindByGap.set(i, 'skipped')
+      continue
+    }
     candidates.push({ index: i, a, b, gapMeters })
   }
 
@@ -285,6 +318,7 @@ export async function bridgeSegmentGaps(
   for (const r of routed) {
     connectorByGap.set(r.index, r.line)
     connectorMeters += r.meters
+    kindByGap.set(r.index, r.ok ? 'routed' : 'straight')
     if (r.ok) routedConnectorCount += 1
   }
 
@@ -293,17 +327,26 @@ export async function bridgeSegmentGaps(
     if (routedIndexes.has(gap.index)) continue
     connectorByGap.set(gap.index, [gap.a, gap.b])
     connectorMeters += gap.gapMeters
+    kindByGap.set(gap.index, 'straight')
   }
 
   const connectorLineStrings = [...connectorByGap.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([, line]) => line)
 
+  const gaps: RouteGapInfo[] = [...kindByGap.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([index, kind]) => {
+      const meta = metaByGap.get(index)!
+      return makeGapInfo(index, meta.a, meta.b, meta.gapMeters, kind)
+    })
+
   return {
     lineStrings: ordered,
     connectorLineStrings,
     connectorMeters,
     routedConnectorCount,
+    gaps,
   }
 }
 
@@ -551,7 +594,7 @@ export async function routeFromOfficialGeometry(
   if (!raw.length) return null
 
   const ordered = orderAndOrientSegments(raw, match.start)
-  const { lineStrings, connectorLineStrings, connectorMeters } =
+  const { lineStrings, connectorLineStrings, connectorMeters, gaps: rawGaps } =
     await bridgeSegmentGaps(ordered, signal)
 
   const officialMeters =
@@ -565,6 +608,12 @@ export async function routeFromOfficialGeometry(
     ...buildConnectorSteps(connectorLineStrings),
   ]
 
+  const gaps: RouteGapInfo[] = rawGaps.map((g) => ({
+    ...g,
+    id: `${match.id}-${g.id}`,
+    label: `${match.name} 내부`,
+  }))
+
   return {
     coordinates: longestLine(lineStrings),
     lineStrings,
@@ -576,6 +625,7 @@ export async function routeFromOfficialGeometry(
     steps,
     fromOfficialGeometry: true,
     source: 'official',
+    gaps: gaps.length ? gaps : undefined,
   }
 }
 

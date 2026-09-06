@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type FormEvent,
+} from 'react'
 import { searchExpressways, isExpresswayQuery } from '../api/ex'
 import {
   isNationalRoadQuery,
@@ -8,6 +14,7 @@ import { searchRoadsNominatim } from '../api/nominatim'
 import { searchRoadsOverpass } from '../api/overpass'
 import { buildChainMarkers, buildChainedRoute } from '../api/roadChain'
 import type { LatLng, RoadMatch, RouteResult, TravelProfile } from '../types'
+import { GapList } from './GapList'
 import { ProfileToggle } from './ProfileToggle'
 import { RouteSummary } from './RouteSummary'
 
@@ -45,6 +52,9 @@ export function RoadNamePanel({
   const metaRef = useRef<{ start: LatLng; end: LatLng; junctions: LatLng[] } | null>(
     null,
   )
+  const dragIndexRef = useRef<number | null>(null)
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
   useEffect(() => {
     if (!chain.length) {
@@ -118,6 +128,56 @@ export function RoadNamePanel({
   function removeAt(index: number) {
     const next = chain.filter((_, i) => i !== index)
     applyChain(next)
+  }
+
+  function resetDrag() {
+    dragIndexRef.current = null
+    setDraggingIndex(null)
+    setDragOverIndex(null)
+  }
+
+  function reorderChain(from: number, to: number) {
+    if (from === to || from < 0 || to < 0 || from >= chain.length || to >= chain.length) {
+      return
+    }
+    const next = [...chain]
+    const [item] = next.splice(from, 1)
+    next.splice(to, 0, item)
+    void applyChain(next)
+  }
+
+  function handleChipDragStart(e: DragEvent, index: number) {
+    if (loading) {
+      e.preventDefault()
+      return
+    }
+    dragIndexRef.current = index
+    setDraggingIndex(index)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(index))
+  }
+
+  function handleChipDragOver(e: DragEvent, index: number) {
+    if (loading || dragIndexRef.current == null) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragOverIndex !== index) setDragOverIndex(index)
+  }
+
+  function handleChipDrop(e: DragEvent, index: number) {
+    e.preventDefault()
+    if (loading) {
+      resetDrag()
+      return
+    }
+    const from = dragIndexRef.current
+    resetDrag()
+    if (from == null) return
+    reorderChain(from, index)
+  }
+
+  function handleChipDragEnd() {
+    resetDrag()
   }
 
   function clearChain() {
@@ -307,22 +367,43 @@ export function RoadNamePanel({
             </button>
           </div>
           <ol className="road-chain-list">
-            {chain.map((m, i) => (
-              <li key={`${m.id}-${i}`} className="road-chain-chip">
-                <span className="road-chain-chip-label">
-                  {i + 1}. {m.name}
-                </span>
-                <button
-                  type="button"
-                  className="road-chain-remove"
-                  aria-label={`${m.name} 제거`}
-                  onClick={() => removeAt(i)}
-                  disabled={loading}
+            {chain.map((m, i) => {
+              const chipClass = [
+                'road-chain-chip',
+                draggingIndex === i ? 'dragging' : '',
+                dragOverIndex === i && draggingIndex !== i ? 'drag-over' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')
+              return (
+                <li
+                  key={`${m.id}-${i}`}
+                  className={chipClass}
+                  draggable={!loading}
+                  onDragStart={(e) => handleChipDragStart(e, i)}
+                  onDragOver={(e) => handleChipDragOver(e, i)}
+                  onDrop={(e) => handleChipDrop(e, i)}
+                  onDragEnd={handleChipDragEnd}
                 >
-                  ×
-                </button>
-              </li>
-            ))}
+                  <span className="road-chain-drag-handle" aria-hidden>
+                    ⠿
+                  </span>
+                  <span className="road-chain-chip-label">
+                    {i + 1}. {m.name}
+                  </span>
+                  <button
+                    type="button"
+                    className="road-chain-remove"
+                    aria-label={`${m.name} 제거`}
+                    onClick={() => removeAt(i)}
+                    disabled={loading}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    ×
+                  </button>
+                </li>
+              )
+            })}
           </ol>
         </div>
       )}
@@ -387,6 +468,9 @@ export function RoadNamePanel({
 
       {error && <p className="error">{error}</p>}
       {dataNote && <p className="hint">{dataNote}</p>}
+      {route?.gaps && route.gaps.length > 0 && (
+        <GapList gaps={route.gaps} onFocusLocation={onFocusLocation} />
+      )}
       <RouteSummary route={route} onStepClick={onFocusLocation} />
       <p className="hint muted">
         국도(예: 2번국도)는 국토교통부 일반국도 도로중심선 공식 데이터를 우선하고,

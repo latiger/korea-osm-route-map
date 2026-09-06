@@ -1,8 +1,10 @@
 import { routeFromOfficialGeometry } from './nationalRoads'
 import { fetchRoute } from './route'
 import type {
+  GapBridgeKind,
   LatLng,
   RoadMatch,
+  RouteGapInfo,
   RouteResult,
   RouteStep,
   RouteSegment,
@@ -11,6 +13,24 @@ import type {
 
 /** Gap larger than this inserts a connector route between roads. */
 const GAP_THRESHOLD_M = 80
+/** Inter-road gaps larger than this are left unconnected (listed as skipped). */
+const GAP_ROUTE_MAX_M = 5000
+
+function formatGapLabelDistance(meters: number): string {
+  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`
+  return `${Math.round(meters)} m`
+}
+
+function flipGaps(gaps: RouteGapInfo[] | undefined): RouteGapInfo[] | undefined {
+  if (!gaps?.length) return gaps
+  return [...gaps]
+    .map((g) => ({
+      ...g,
+      from: g.to,
+      to: g.from,
+    }))
+    .reverse()
+}
 
 function haversineMeters(a: LatLng, b: LatLng): number {
   const R = 6371000
@@ -133,6 +153,7 @@ function orientRoad(
             }))
             .reverse()
         : undefined,
+      gaps: flipGaps(road.route.gaps),
     },
   }
 }
@@ -201,6 +222,7 @@ export async function buildChainedRoute(
   const allCoords: LatLng[] = []
   const allSteps: RouteStep[] = []
   const trafficSegments: RouteSegment[] = []
+  const allGaps: RouteGapInfo[] = []
   const junctions: LatLng[] = []
   let distanceMeters = 0
   let durationSeconds = 0
@@ -215,23 +237,74 @@ export async function buildChainedRoute(
       const prev = materialized[i - 1]
       const gap = haversineMeters(prev.end, road.start)
       if (gap > GAP_THRESHOLD_M) {
-        const conn = await fetchRoute([prev.end, road.start], profile, signal)
-        distanceMeters += conn.distanceMeters
-        durationSeconds += conn.durationSeconds
-        allSteps.push(...connectorSteps(conn))
+        const gapLabel = `${prev.match.name} → ${road.match.name} 연결`
+        let kind: GapBridgeKind = 'routed'
 
-        if (conn.trafficSegments?.length) {
-          trafficSegments.push(...conn.trafficSegments)
-          for (const seg of conn.trafficSegments) {
-            allCoords.push(...seg.coordinates)
-          }
+        if (gap > GAP_ROUTE_MAX_M) {
+          kind = 'skipped'
+          allGaps.push({
+            id: `inter-${i}`,
+            label: gapLabel,
+            from: prev.end,
+            to: road.start,
+            gapMeters: gap,
+            kind,
+          })
+          junctions.push(prev.end)
         } else {
-          const connLines = lineStringsFromRoute(conn)
-          allLineStrings.push(...connLines)
-          for (const line of connLines) allCoords.push(...line)
+          let conn: RouteResult | null = null
+          try {
+            conn = await fetchRoute([prev.end, road.start], profile, signal)
+          } catch (e) {
+            if ((e as Error).name === 'AbortError') throw e
+            console.warn('[roadChain] inter-road connector failed, using straight:', e)
+            kind = 'straight'
+          }
+
+          if (conn) {
+            kind = 'routed'
+            distanceMeters += conn.distanceMeters
+            durationSeconds += conn.durationSeconds
+            allSteps.push(...connectorSteps(conn))
+
+            if (conn.trafficSegments?.length) {
+              trafficSegments.push(...conn.trafficSegments)
+              for (const seg of conn.trafficSegments) {
+                allCoords.push(...seg.coordinates)
+              }
+            } else {
+              const connLines = lineStringsFromRoute(conn)
+              allLineStrings.push(...connLines)
+              for (const line of connLines) allCoords.push(...line)
+            }
+            anyNonOfficial = true
+          } else {
+            kind = 'straight'
+            const straight: LatLng[] = [prev.end, road.start]
+            allConnectorLineStrings.push(straight)
+            allCoords.push(...straight)
+            distanceMeters += gap
+            durationSeconds += (gap / 1000 / 60) * 3600
+            allSteps.push({
+              type: 'connect',
+              label: `연결 · ${formatGapLabelDistance(gap)} (직선)`,
+              name: '연결',
+              distanceMeters: gap,
+              durationSeconds: (gap / 1000 / 60) * 3600,
+              location: prev.end,
+            })
+          }
+
+          allGaps.push({
+            id: `inter-${i}`,
+            label: gapLabel,
+            from: prev.end,
+            to: road.start,
+            gapMeters: gap,
+            kind,
+          })
+          junctions.push(prev.end)
         }
-        anyNonOfficial = true
-        junctions.push(prev.end)
       } else if (gap > 1) {
         junctions.push(prev.end)
       }
@@ -248,6 +321,9 @@ export async function buildChainedRoute(
     if (roadConnectors?.length) {
       allConnectorLineStrings.push(...roadConnectors)
       for (const line of roadConnectors) allCoords.push(...line)
+    }
+    if (road.route.gaps?.length) {
+      allGaps.push(...road.route.gaps)
     }
     distanceMeters += road.route.distanceMeters
     durationSeconds += road.route.durationSeconds
@@ -270,6 +346,7 @@ export async function buildChainedRoute(
       fromOfficialGeometry: anyOfficial && !anyNonOfficial,
       source: anyOfficial ? 'official' : 'osrm',
       trafficSegments: trafficSegments.length ? trafficSegments : undefined,
+      gaps: allGaps.length ? allGaps : undefined,
     },
     start: first.start,
     end: last.end,

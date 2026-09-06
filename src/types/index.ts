@@ -78,6 +78,8 @@ export interface RouteResult {
   trafficSegments?: RouteSegment[]
   /** Routing / geometry provenance */
   source?: 'kakao' | 'osrm' | 'official'
+  /** Discontinuous gaps within / between roads (official geometry) */
+  gaps?: RouteGapInfo[]
 }
 
 export type TrafficState = 0 | 1 | 2 | 3 | 4 | 6
@@ -87,4 +89,16 @@ export interface RouteSegment {
   trafficState: number
   trafficSpeed?: number
   name?: string
+}
+
+export type GapBridgeKind = 'routed' | 'straight' | 'skipped'
+
+export interface RouteGapInfo {
+  id: string
+  /** e.g. "국도 제77호선 내부" or "77번 → 2번 연결" */
+  label: string
+  from: LatLng
+  to: LatLng
+  gapMeters: number
+  kind: GapBridgeKind // routed=길찾기연결, straight=직선점선, skipped=미연결(>5km 등)
 }

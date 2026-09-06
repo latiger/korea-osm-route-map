@@ -16,6 +16,14 @@ export const SEOUL_CENTER: LatLng = { lat: 37.5665, lng: 126.978 }
 export const DEFAULT_ZOOM = 12
 
 const ROUTE_STYLE = { color: '#2563eb', weight: 5, opacity: 0.85 }
+const CONNECTOR_STYLE = {
+  color: '#64748b',
+  weight: 4,
+  opacity: 0.85,
+  dashArray: '6 8',
+  lineCap: 'round' as const,
+  lineJoin: 'round' as const,
+}
 const TRAFFIC_WEIGHT = 6
 const FOCUS_ZOOM = 18
 
@@ -243,6 +251,10 @@ export interface MapCanvasProps {
    * When present and non-empty, drawn as blue polylines (alongside trafficSegments).
    */
   routeLineStrings?: LatLng[][]
+  /**
+   * Gap bridges between official MultiLineString parts — dashed slate.
+   */
+  connectorLineStrings?: LatLng[][]
   /** Kakao traffic-colored road segments (preferred when present) */
   trafficSegments?: RouteSegment[]
   /** When set, map clicks place OD points (keep armed until toggled off) */
@@ -261,6 +273,7 @@ export function MapCanvas({
   markers = [],
   route = [],
   routeLineStrings,
+  connectorLineStrings,
   trafficSegments,
   placeMode = null,
   onPlaceModeChange,
@@ -284,9 +297,12 @@ export function MapCanvas({
   const useTraffic = traffic.length > 0
   const multi = routeLineStrings?.filter((line) => line.length > 1) ?? []
   const useMulti = multi.length > 0
+  const connectors =
+    connectorLineStrings?.filter((line) => line.length > 1) ?? []
   const fitRoute = [
     ...(useTraffic ? traffic.flatMap((s) => s.coordinates) : []),
     ...(useMulti ? multi.flat() : []),
+    ...connectors.flat(),
     ...(!useTraffic && !useMulti ? route : []),
   ]
 
@@ -343,6 +359,13 @@ export function MapCanvas({
             pathOptions={ROUTE_STYLE}
           />
         ))}
+      {connectors.map((line, i) => (
+        <Polyline
+          key={`connector-line-${i}`}
+          positions={line.map((p) => [p.lat, p.lng] as [number, number])}
+          pathOptions={CONNECTOR_STYLE}
+        />
+      ))}
       {useTraffic &&
         traffic.map((seg, i) => (
           <Polyline

@@ -64,6 +64,11 @@ export interface RouteResult {
    * Preferred drawing path for official roads: one Polyline per entry.
    */
   lineStrings?: LatLng[][]
+  /**
+   * Straight (or routed) gap fillers between ordered official MultiLineString
+   * segments. Drawn dashed in MapCanvas — keep separate from lineStrings.
+   */
+  connectorLineStrings?: LatLng[][]
   distanceMeters: number
   durationSeconds: number
   steps: RouteStep[]

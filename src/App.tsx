@@ -129,6 +129,7 @@ function App() {
             markers={markers}
             route={route?.coordinates ?? []}
             routeLineStrings={route?.lineStrings}
+            connectorLineStrings={route?.connectorLineStrings}
             trafficSegments={route?.trafficSegments}
             showPlaceControls={mode === 'od'}
             placeMode={placeMode}

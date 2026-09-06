@@ -29,6 +29,11 @@ function reverseLineStrings(lines: LatLng[][]): LatLng[][] {
   return [...lines].map((l) => [...l].reverse()).reverse()
 }
 
+function reverseConnectorLineStrings(lines: LatLng[][] | undefined): LatLng[][] | undefined {
+  if (!lines?.length) return undefined
+  return reverseLineStrings(lines)
+}
+
 function lineStringsFromRoute(route: RouteResult): LatLng[][] {
   if (route.lineStrings?.length) {
     return route.lineStrings.filter((l) => l.length >= 2)
@@ -50,6 +55,7 @@ interface MaterializedRoad {
   start: LatLng
   end: LatLng
   lineStrings: LatLng[][]
+  connectorLineStrings?: LatLng[][]
   official: boolean
 }
 
@@ -66,6 +72,7 @@ async function materializeRoad(
       start: match.start,
       end: match.end,
       lineStrings: lineStringsFromRoute(official),
+      connectorLineStrings: official.connectorLineStrings,
       official: true,
     }
   }
@@ -101,14 +108,19 @@ function orientRoad(
   const distToEnd = haversineMeters(prevEnd, road.end)
   if (distToEnd >= distToStart) return road
 
+  const flippedConnectors = reverseConnectorLineStrings(
+    road.connectorLineStrings ?? road.route.connectorLineStrings,
+  )
   return {
     ...road,
     start: road.end,
     end: road.start,
     lineStrings: reverseLineStrings(road.lineStrings),
+    connectorLineStrings: flippedConnectors,
     route: {
       ...road.route,
       lineStrings: reverseLineStrings(lineStringsFromRoute(road.route)),
+      connectorLineStrings: flippedConnectors,
       coordinates: road.route.coordinates
         ? [...road.route.coordinates].reverse()
         : road.route.coordinates,
@@ -185,6 +197,7 @@ export async function buildChainedRoute(
   }
 
   const allLineStrings: LatLng[][] = []
+  const allConnectorLineStrings: LatLng[][] = []
   const allCoords: LatLng[] = []
   const allSteps: RouteStep[] = []
   const trafficSegments: RouteSegment[] = []
@@ -227,9 +240,15 @@ export async function buildChainedRoute(
     if (road.official) anyOfficial = true
     else anyNonOfficial = true
 
-    // Road parts as lineStrings (blue); connectors may add trafficSegments.
+    // Road parts as lineStrings (blue); intra-road gap bridges as dashed connectors.
     allLineStrings.push(...road.lineStrings)
     for (const line of road.lineStrings) allCoords.push(...line)
+    const roadConnectors =
+      road.connectorLineStrings ?? road.route.connectorLineStrings
+    if (roadConnectors?.length) {
+      allConnectorLineStrings.push(...roadConnectors)
+      for (const line of roadConnectors) allCoords.push(...line)
+    }
     distanceMeters += road.route.distanceMeters
     durationSeconds += road.route.durationSeconds
     allSteps.push(...prefixSteps(road.route.steps, road.match.name))
@@ -242,6 +261,9 @@ export async function buildChainedRoute(
     route: {
       coordinates: allCoords.length ? allCoords : first.route.coordinates,
       lineStrings: allLineStrings.length ? allLineStrings : undefined,
+      connectorLineStrings: allConnectorLineStrings.length
+        ? allConnectorLineStrings
+        : undefined,
       distanceMeters,
       durationSeconds,
       steps: allSteps,

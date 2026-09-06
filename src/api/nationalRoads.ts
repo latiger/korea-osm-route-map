@@ -38,6 +38,10 @@ interface NationalRoadDetail extends NationalRoadIndexEntry {
 const MAX_OFFICIAL_STEPS = 40
 /** Merge consecutive segments shorter than this into one step label */
 const TINY_SEGMENT_M = 500
+/** Bridge visual gaps larger than this between ordered official segments */
+const GAP_BRIDGE_M = 90
+/** Connector steps shorter than this are merged / omitted from the step list */
+const TINY_CONNECTOR_STEP_M = 500
 
 let indexCache: NationalRoadIndex | null = null
 let indexPromise: Promise<NationalRoadIndex | null> | null = null
@@ -97,6 +101,160 @@ export function parseOfficialLineStrings(detail: NationalRoadDetail): LatLng[][]
     return [detail.coordinates]
   }
   return []
+}
+
+
+/**
+ * Greedy order + orient MultiLineString parts into one traversal.
+ * Starts near `startHint` (match.start) when provided; otherwise first segment.
+ * Remaining far islands are still attached by nearest endpoint.
+ */
+export function orderAndOrientSegments(
+  segments: LatLng[][],
+  startHint?: LatLng,
+): LatLng[][] {
+  const usable = segments.filter((s) => s.length >= 2).map((s) => s.slice())
+  if (usable.length <= 1) return usable
+
+  const unused = usable
+  const ordered: LatLng[][] = []
+
+  const pickNearest = (tip: LatLng): { seg: LatLng[]; reverse: boolean; idx: number; dist: number } => {
+    let bestIdx = 0
+    let bestDist = Infinity
+    let bestReverse = false
+    for (let i = 0; i < unused.length; i++) {
+      const seg = unused[i]
+      const dStart = haversineMeters(tip, seg[0])
+      const dEnd = haversineMeters(tip, seg[seg.length - 1])
+      if (dStart < bestDist) {
+        bestDist = dStart
+        bestIdx = i
+        bestReverse = false
+      }
+      if (dEnd < bestDist) {
+        bestDist = dEnd
+        bestIdx = i
+        bestReverse = true
+      }
+    }
+    return { seg: unused[bestIdx], reverse: bestReverse, idx: bestIdx, dist: bestDist }
+  }
+
+  // First segment: nearest endpoint to startHint, else keep file order of first
+  if (startHint) {
+    const first = pickNearest(startHint)
+    unused.splice(first.idx, 1)
+    const oriented = first.reverse ? first.seg.slice().reverse() : first.seg
+    ordered.push(oriented)
+  } else {
+    ordered.push(unused.shift()!)
+  }
+
+  while (unused.length) {
+    const tip = ordered[ordered.length - 1][ordered[ordered.length - 1].length - 1]
+    const next = pickNearest(tip)
+    unused.splice(next.idx, 1)
+    const oriented = next.reverse ? next.seg.slice().reverse() : next.seg
+    ordered.push(oriented)
+  }
+
+  return ordered
+}
+
+/**
+ * Between consecutive oriented segments, insert a straight connector when the
+ * gap exceeds GAP_BRIDGE_M. Official parts stay in `lineStrings`; bridges go
+ * to `connectorLineStrings` for dashed styling.
+ */
+export function bridgeSegmentGaps(ordered: LatLng[][]): {
+  lineStrings: LatLng[][]
+  connectorLineStrings: LatLng[][]
+  connectorMeters: number
+} {
+  const connectorLineStrings: LatLng[][] = []
+  let connectorMeters = 0
+
+  for (let i = 1; i < ordered.length; i++) {
+    const prev = ordered[i - 1]
+    const next = ordered[i]
+    const end = prev[prev.length - 1]
+    const start = next[0]
+    const gap = haversineMeters(end, start)
+    if (gap > GAP_BRIDGE_M) {
+      connectorLineStrings.push([end, start])
+      connectorMeters += gap
+    }
+  }
+
+  return {
+    lineStrings: ordered,
+    connectorLineStrings,
+    connectorMeters,
+  }
+}
+
+function buildConnectorSteps(connectors: LatLng[][]): RouteStep[] {
+  if (!connectors.length) return []
+
+  type Seg = { dist: number; location?: LatLng; count: number }
+  const raw: Seg[] = connectors.map((line) => ({
+    dist: pathLengthMeters(line),
+    location: line[0],
+    count: 1,
+  }))
+
+  const merged: Seg[] = []
+  for (const seg of raw) {
+    const last = merged[merged.length - 1]
+    if (
+      last &&
+      (seg.dist < TINY_CONNECTOR_STEP_M || last.dist < TINY_CONNECTOR_STEP_M)
+    ) {
+      last.dist += seg.dist
+      last.count += seg.count
+    } else {
+      merged.push({ ...seg })
+    }
+  }
+
+  // Drop leftover tiny merged blobs under threshold (visual only / in distance)
+  const notable = merged.filter((s) => s.dist >= TINY_CONNECTOR_STEP_M)
+  if (!notable.length && merged.length) {
+    // One summary step if total connector length is meaningful
+    const total = merged.reduce((n, s) => n + s.dist, 0)
+    if (total >= GAP_BRIDGE_M) {
+      return [
+        {
+          type: 'connect',
+          label:
+            total >= 1000
+              ? `연결 · ${(total / 1000).toFixed(1)} km`
+              : `연결 · ${Math.round(total)} m`,
+          name: '연결',
+          distanceMeters: total,
+          durationSeconds: (total / 1000 / 60) * 3600,
+          location: merged[0].location,
+        },
+      ]
+    }
+    return []
+  }
+
+  return notable.map((seg) => {
+    const label =
+      seg.dist >= 1000
+        ? `연결 · ${(seg.dist / 1000).toFixed(1)} km`
+        : `연결 · ${Math.round(seg.dist)} m`
+    return {
+      type: 'connect',
+      label: seg.count > 1 ? `${label} (${seg.count}개)` : label,
+      name: '연결',
+      distanceMeters: seg.dist,
+      durationSeconds: (seg.dist / 1000 / 60) * 3600,
+      location: seg.location,
+    }
+  })
 }
 
 function pathLengthMeters(path: LatLng[]): number {
@@ -265,25 +423,37 @@ export async function searchNationalRoads(
 
 /**
  * Build a RouteResult from official MultiLineString geometry (no OSRM).
- * Uses lineStrings for map drawing; coordinates = longest line (markers/fallback).
+ * Orders/orients segments, bridges visual gaps with straight connectors
+ * (dashed on the map). coordinates = longest official line (markers/fallback).
  */
 export function routeFromOfficialGeometry(match: RoadMatch): RouteResult | null {
-  const lineStrings =
+  const raw =
     match.lineStrings?.filter((l) => l.length >= 2) ??
     (match.geometry && match.geometry.length >= 2 ? [match.geometry] : [])
 
-  if (!lineStrings.length) return null
+  if (!raw.length) return null
 
-  const distanceMeters =
+  const ordered = orderAndOrientSegments(raw, match.start)
+  const { lineStrings, connectorLineStrings, connectorMeters } =
+    bridgeSegmentGaps(ordered)
+
+  const officialMeters =
     match.lengthMeters ??
     lineStrings.reduce((acc, line) => acc + pathLengthMeters(line), 0)
-
+  const distanceMeters = officialMeters + connectorMeters
   const durationSeconds = (distanceMeters / 1000 / 60) * 3600
-  const steps = buildOfficialSteps(lineStrings, match.name, match.agencies)
+
+  const steps = [
+    ...buildOfficialSteps(lineStrings, match.name, match.agencies),
+    ...buildConnectorSteps(connectorLineStrings),
+  ]
 
   return {
     coordinates: longestLine(lineStrings),
     lineStrings,
+    connectorLineStrings: connectorLineStrings.length
+      ? connectorLineStrings
+      : undefined,
     distanceMeters,
     durationSeconds,
     steps,

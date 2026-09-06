@@ -1,22 +1,17 @@
 import type { GeocodeResult } from '../types'
-import {
-  geocodeJuso,
-  JusoKeyMissingError,
-  searchJuso,
-  jusoToGeocodeResults,
-} from './juso'
+import { geocodeKakao, KakaoKeyMissingError } from './kakao'
 import { geocodeKorea as geocodeNominatim } from './nominatim'
 
 /**
- * Prefer 행정안전부 도로명주소 (Juso) when the dev proxy has a confmKey.
+ * Prefer Kakao Local API (address + keyword) when the dev proxy has a REST key.
  * Falls back to Nominatim when:
- * - no key (proxy 503 / JusoKeyMissingError)
- * - Juso search returns empty
- * - Juso path throws unexpectedly
+ * - no key (proxy 503 / KakaoKeyMissingError)
+ * - Kakao search returns empty
+ * - Kakao path throws unexpectedly
  *
  * OriginDestPanel should call this instead of Nominatim-only geocodeKorea.
  */
-export async function geocodeKoreaPreferJuso(
+export async function geocodeKoreaPreferKakao(
   query: string,
   signal?: AbortSignal,
 ): Promise<GeocodeResult[]> {
@@ -24,30 +19,29 @@ export async function geocodeKoreaPreferJuso(
   if (!q) return []
 
   try {
-    const addresses = await searchJuso(q, signal)
-    if (addresses.length > 0) {
-      const jusoResults = await jusoToGeocodeResults(addresses, signal)
-      if (jusoResults.length > 0) return jusoResults
-      // Search hit but no coords resolved — still try Nominatim on original query
-    }
+    const kakaoResults = await geocodeKakao(q, signal)
+    if (kakaoResults.length > 0) return kakaoResults
   } catch (e) {
-    if (e instanceof JusoKeyMissingError) {
+    if (e instanceof KakaoKeyMissingError) {
       // Expected without .env key — silent fallback
     } else if ((e as Error).name === 'AbortError') {
       throw e
     }
-    // Other Juso errors: fall through to Nominatim
+    // Other Kakao errors: fall through to Nominatim
   }
 
   return geocodeNominatim(q, signal)
 }
 
-/** @deprecated Prefer geocodeKoreaPreferJuso — kept as alias for clarity at call sites. */
+/** @deprecated Prefer geocodeKoreaPreferKakao — kept as alias for call sites. */
 export async function geocodeKorea(
   query: string,
   signal?: AbortSignal,
 ): Promise<GeocodeResult[]> {
-  return geocodeKoreaPreferJuso(query, signal)
+  return geocodeKoreaPreferKakao(query, signal)
 }
 
-export { geocodeJuso, JusoKeyMissingError }
+/** @deprecated Renamed to geocodeKoreaPreferKakao (Kakao is primary). */
+export const geocodeKoreaPreferJuso = geocodeKoreaPreferKakao
+
+export { KakaoKeyMissingError }

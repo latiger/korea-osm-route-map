@@ -4,14 +4,90 @@ import type { Plugin } from 'vite'
 import { defineConfig, loadEnv } from 'vite'
 
 /**
- * Dev proxy for 행정안전부 도로명주소 (Juso) Open API.
+ * Dev proxy for Kakao Local API (primary geocoding).
  *
- * - /api/juso/search → https://business.juso.go.kr/addrlink/addrLinkApi.do
- * - /api/juso/coord  → https://business.juso.go.kr/addrlink/addrCoordApi.do
+ * - /api/kakao/address → https://dapi.kakao.com/v2/local/search/address.json
+ * - /api/kakao/keyword → https://dapi.kakao.com/v2/local/search/keyword.json
  *
- * Injects confmKey from server env only (never exposed to the browser bundle).
- * Prefer JUSO_CONFM_KEY; VITE_JUSO_CONFM_KEY accepted as legacy fallback.
+ * Injects Authorization: KakaoAK … from server env only (never in browser bundle).
+ * Prefer KAKAO_REST_API_KEY; VITE_KAKAO_REST_API_KEY accepted as legacy migration.
  * Without a key, responds 503 so the client can fall back to Nominatim.
+ */
+function kakaoProxyPlugin(restApiKey: string): Plugin {
+  async function proxyKakao(
+    upstreamPath: string,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
+    if (!restApiKey) {
+      res.statusCode = 503
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.end(
+        JSON.stringify({
+          error: 'KAKAO_REST_API_KEY not configured',
+          message:
+            '카카오 REST API 키가 없습니다. .env에 KAKAO_REST_API_KEY를 설정한 뒤 개발 서버를 재시작하세요.',
+        }),
+      )
+      return
+    }
+
+    const incoming = new URL(req.url ?? '/', 'http://localhost')
+    const target = new URL(upstreamPath, 'https://dapi.kakao.com')
+    incoming.searchParams.forEach((v, k) => {
+      target.searchParams.set(k, v)
+    })
+
+    try {
+      const upstream = await fetch(target.toString(), {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          Authorization: `KakaoAK ${restApiKey}`,
+        },
+      })
+      const body = await upstream.text()
+      res.statusCode = upstream.status
+      res.setHeader(
+        'Content-Type',
+        upstream.headers.get('content-type') ??
+          'application/json; charset=utf-8',
+      )
+      res.end(body)
+    } catch (e) {
+      res.statusCode = 502
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.end(
+        JSON.stringify({
+          error: 'kakao_upstream_failed',
+          message: (e as Error).message,
+        }),
+      )
+    }
+  }
+
+  return {
+    name: 'kakao-proxy',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url ?? ''
+        if (url.startsWith('/api/kakao/address')) {
+          void proxyKakao('/v2/local/search/address.json', req, res)
+          return
+        }
+        if (url.startsWith('/api/kakao/keyword')) {
+          void proxyKakao('/v2/local/search/keyword.json', req, res)
+          return
+        }
+        next()
+      })
+    },
+  }
+}
+
+/**
+ * Optional legacy Juso proxy (unused by primary geocode path).
+ * Kept so existing Juso client code still works if called directly.
  */
 function jusoProxyPlugin(confmKey: string): Plugin {
   async function proxyJuso(
@@ -73,9 +149,6 @@ function jusoProxyPlugin(confmKey: string): Plugin {
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const url = req.url ?? ''
-        // Proxy map (key injected server-side):
-        //   /api/juso/search → addrLinkApi.do
-        //   /api/juso/coord  → addrCoordApi.do
         if (url.startsWith('/api/juso/search')) {
           void proxyJuso('/addrlink/addrLinkApi.do', req, res)
           return
@@ -92,12 +165,16 @@ function jusoProxyPlugin(confmKey: string): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  // Empty prefix loads non-VITE_ vars (JUSO_CONFM_KEY stays server-only)
+  // Empty prefix loads non-VITE_ vars (keys stay server-only)
   const env = loadEnv(mode, process.cwd(), '')
+  const kakaoKey =
+    env.KAKAO_REST_API_KEY?.trim() ||
+    env.VITE_KAKAO_REST_API_KEY?.trim() ||
+    ''
   const confmKey =
     env.JUSO_CONFM_KEY?.trim() || env.VITE_JUSO_CONFM_KEY?.trim() || ''
 
   return {
-    plugins: [react(), jusoProxyPlugin(confmKey)],
+    plugins: [react(), kakaoProxyPlugin(kakaoKey), jusoProxyPlugin(confmKey)],
   }
 })

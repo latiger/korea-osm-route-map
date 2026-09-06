@@ -25,7 +25,11 @@ export function RouteSummary({ route }: Props) {
         </span>
         <span>
           <strong>소요</strong> {formatDuration(route.durationSeconds)}
+          {route.fromOfficialGeometry ? ' (approx)' : ''}
         </span>
+        {route.fromOfficialGeometry && (
+          <span className="hint muted">official centerline geometry</span>
+        )}
         {list.length > 0 && (
           <button
             type="button"

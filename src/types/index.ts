@@ -21,6 +21,14 @@ export interface RoadMatch {
   start: LatLng
   end: LatLng
   geometry?: LatLng[]
+  /** Data provenance for 도로명 mode */
+  source?: 'molit' | 'ex' | 'overpass' | 'nominatim'
+  /** Official / estimated length in meters when known */
+  lengthMeters?: number
+  /** EX route number (padded) when from expressway index */
+  exRouteNo?: string
+  /** When true, geometry/start/end are placeholders — use Overpass */
+  needsGeometryFallback?: boolean
 }
 
 export interface RouteStep {
@@ -42,4 +50,6 @@ export interface RouteResult {
   distanceMeters: number
   durationSeconds: number
   steps: RouteStep[]
+  /** When drawn from official centerline rather than OSRM */
+  fromOfficialGeometry?: boolean
 }

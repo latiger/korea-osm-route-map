@@ -7,7 +7,7 @@ OpenStreetMap 타일, OSRM 공개 라우팅 API, Nominatim(및 Overpass) 지오�
 ## 기능
 
 1. **출발·도착** — 출발지·도착지 텍스트 검색(Kakao 주소+키워드 우선 → Nominatim 폴백), 마커, OSRM 경로(자동차/도보), 거리·소요 시간 표시
-2. **도로명** — 도로명 검색(Overpass 우선, Nominatim 보조). 여러 결과 시 선택 UI. 도로 시작→끝 OSRM 경로
+2. **도로명** — 국도 번호는 MOLIT 공식 중심선 우선, 고속도로는 EX 노선목록+Overpass, 일반 도로명은 Overpass→Nominatim. 공식 선형이 있으면 그대로 표시, 없으면 시점·종점 OSRM
 3. **점 이어 경로** — 지도 클릭으로 경유점 추가, 순서대로 OSRM 경로 연결, 초기화
 
 ## 로컬 실행
@@ -75,7 +75,8 @@ Production needs a backend reverse proxy; Vite proxy is dev-only.
 | 지도 타일 | OpenStreetMap | tile.openstreetmap.org |
 | 경로 | OSRM public demo | router.project-osrm.org (driving / walking) |
 | 지오코딩 | Kakao Local (선택) + Nominatim | 키 없으면 Nominatim만 |
-| 도로 geometry | Overpass API | overpass-api.de |
+| 도로 geometry | MOLIT 국도중심선 + Overpass | public/data/national-roads, overpass-api.de |
+| 고속도로 노선명 | EX OpenAPI (선택 키) | data.ex.co.kr; 없으면 정적 인덱스 |
 
 Kakao REST 키는 선택입니다(없어도 Nominatim 폴백).
 
@@ -87,6 +88,41 @@ Kakao REST 키는 선택입니다(없어도 Nominatim 폴백).
 - Overpass / Nominatim / OSRM / Kakao 모두 공개 인프라에 의존하므로 간헐적 오류·속도 저하가 있을 수 있습니다.
 - **도로명 모드**: OSM에 도로 name 태그가 없거나 구간이 여러 way로 쪼개진 경우 결과가 불완전할 수 있습니다. Nominatim만 매칭되면 점 주변의 대략 구간으로 대체합니다.
 - 한국 외 좌표·주소는 의도적으로 제한·비중이 낮습니다(기본 중심: 서울).
+
+
+
+## 공식 도로 데이터 (국도 · 고속도로)
+
+ITS(국가교통정보센터)는 사용하지 않습니다(사이트 차단/미연동).
+
+### 일반국도 (국토교통부 MOLIT)
+
+- 출처: [국토교통부_일반국도 도로중심선](https://www.data.go.kr/data/15122482/fileData.do) (SHP, WGS84)
+- 「도로명」 모드에서 `2번국도`, `국도2호선` 등 **국도 번호 질의** 시 Overpass보다 **이 공식 중심선**을 우선합니다.
+- 처리 산출물: `public/data/national-roads/index.json` + 노선별 `{routeNo}.json` (간소화 geometry)
+- 원본 ZIP/SHP는 `data/raw/`에 두고 **gitignore** 합니다(용량 큼). 재처리:
+
+```bash
+# data.go.kr에서 ZIP 다운로드 후 압축 해제
+python3 scripts/process_molit_national_roads.py --shp data/raw/molit_shp/국도중심선_2025-08.shp
+```
+
+- 한계: 국토교통부 관할 **일반국도**만 포함(고속국도·지방도·시군도 제외). 구간이 여러 LineString으로 나뉩니다. 표시용으로 simplify·downsample 했습니다.
+
+### 고속도로 (한국도로공사 EX)
+
+- 포털: [data.ex.co.kr](https://data.ex.co.kr) OpenAPI
+- `.env`에 `EX_API_KEY=` (서버 전용). 문서상 데모 키 `test`는 일부 API(실시간 교통량 등)에서 동작합니다. **개인 키 발급 권장**: https://data.ex.co.kr/openapi/apikey/requestKey
+- Dev 프록시: `/api/ex/routes` (노선 번호·이름 목록), `/api/ex/proxy?path=/openapi/...`
+- 정적 스냅샷: `public/data/expressways/routes-index.json` (키 없이도 이름/번호 검색 가능)
+- **geometry**: 노드 이정·시점/종점 좌표 OpenAPI는 데모 키만으로 안정적으로 확보되지 않아, 고속도로 선형은 **OSM Overpass 폴백**을 유지합니다. 노드 이정 파일/키가 있으면 추후 OSRM 시점·종점 라우팅으로 확장 가능합니다.
+
+### 데이터 우선순위 (도로명 모드)
+
+1. 국도 번호 질의 → MOLIT 중심선 geometry (있으면 지도에 공식 선형 표시)
+2. 고속도로 질의 → EX 노선명 매칭 → Overpass geometry → (없으면) Nominatim
+3. 일반 도로명 → Overpass → Nominatim
+4. 공식 선형이 없을 때만 시점·종점 OSRM 연결
 
 ## 스택
 

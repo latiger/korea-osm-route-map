@@ -16,11 +16,20 @@ export const SEOUL_CENTER: LatLng = { lat: 37.5665, lng: 126.978 }
 export const DEFAULT_ZOOM = 12
 
 const ROUTE_STYLE = { color: '#2563eb', weight: 5, opacity: 0.85 }
-const CONNECTOR_STYLE = {
+/** Straight 2-point gap fallback — dashed slate */
+const CONNECTOR_FALLBACK_STYLE = {
   color: '#64748b',
   weight: 4,
   opacity: 0.85,
   dashArray: '6 8',
+  lineCap: 'round' as const,
+  lineJoin: 'round' as const,
+}
+/** Routed gap bridge (Kakao/OSRM polyline with >2 points) — solid amber */
+const CONNECTOR_ROUTED_STYLE = {
+  color: '#f59e0b',
+  weight: 5,
+  opacity: 0.9,
   lineCap: 'round' as const,
   lineJoin: 'round' as const,
 }
@@ -252,7 +261,8 @@ export interface MapCanvasProps {
    */
   routeLineStrings?: LatLng[][]
   /**
-   * Gap bridges between official MultiLineString parts — dashed slate.
+   * Gap bridges between official MultiLineString parts.
+   * 2-point lines = dashed straight fallback; >2 points = solid routed path.
    */
   connectorLineStrings?: LatLng[][]
   /** Kakao traffic-colored road segments (preferred when present) */
@@ -363,7 +373,9 @@ export function MapCanvas({
         <Polyline
           key={`connector-line-${i}`}
           positions={line.map((p) => [p.lat, p.lng] as [number, number])}
-          pathOptions={CONNECTOR_STYLE}
+          pathOptions={
+            line.length > 2 ? CONNECTOR_ROUTED_STYLE : CONNECTOR_FALLBACK_STYLE
+          }
         />
       ))}
       {useTraffic &&

@@ -329,9 +329,15 @@ export function RoadNamePanel({
         },
       ]
 
+      const mergedTraffic =
+        conn.trafficSegments?.length
+          ? [...(route.trafficSegments ?? []), ...conn.trafficSegments]
+          : route.trafficSegments
+
       const nextRoute: RouteResult = {
         ...route,
         connectorLineStrings: nextConnectors,
+        trafficSegments: mergedTraffic,
         distanceMeters,
         durationSeconds,
         gaps,
@@ -419,9 +425,15 @@ export function RoadNamePanel({
               location: live.from,
             },
           ]
+          const mergedTraffic =
+            conn.trafficSegments?.length
+              ? [...(current.trafficSegments ?? []), ...conn.trafficSegments]
+              : current.trafficSegments
+
           current = {
             ...current,
             connectorLineStrings: nextConnectors,
+            trafficSegments: mergedTraffic,
             distanceMeters,
             durationSeconds,
             gaps,

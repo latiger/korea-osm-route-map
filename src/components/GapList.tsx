@@ -58,6 +58,9 @@ export function GapList({
           </button>
         )}
       </div>
+      <p className="hint muted gap-connect-hint">
+        이어서 연결 = 카카오/OSRM 실제 경로
+      </p>
       <ul className="gap-list-items">
         {gaps.map((gap) => {
           const badge = KIND_BADGE[gap.kind]

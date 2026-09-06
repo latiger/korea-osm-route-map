@@ -11,22 +11,6 @@ import {
 import L from 'leaflet'
 import { trafficStateColor } from '../api/kakaoNavi'
 import type { LatLng, RouteSegment } from '../types'
-import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
-import markerIcon from 'leaflet/dist/images/marker-icon.png'
-import markerShadow from 'leaflet/dist/images/marker-shadow.png'
-
-// Fix default marker icons under Vite
-const DefaultIcon = L.icon({
-  iconUrl: markerIcon,
-  iconRetinaUrl: markerIcon2x,
-  shadowUrl: markerShadow,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-})
-L.Marker.prototype.options.icon = DefaultIcon
-
 export const SEOUL_CENTER: LatLng = { lat: 37.5665, lng: 126.978 }
 export const DEFAULT_ZOOM = 12
 
@@ -34,13 +18,44 @@ const ROUTE_STYLE = { color: '#2563eb', weight: 5, opacity: 0.85 }
 const TRAFFIC_WEIGHT = 6
 const FOCUS_ZOOM = 18
 
-const waypointIcon = (n: number) =>
-  L.divIcon({
-    className: 'waypoint-marker',
-    html: `<div class="waypoint-badge">${n}</div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
+type MarkerRole = 'start' | 'end' | 'via'
+
+function roleFromKey(key: string): MarkerRole {
+  if (key === 'origin' || key === 'chain-start') return 'start'
+  if (key === 'dest' || key === 'chain-end') return 'end'
+  return 'via'
+}
+
+function badgeIcon(role: MarkerRole, label: string) {
+  const wide = role === 'start' || role === 'end'
+  const w = wide ? 48 : 26
+  const h = wide ? 32 : 26
+  return L.divIcon({
+    className: 'marker-icon',
+    html: `<div class="marker-badge ${role}">${label}</div>`,
+    iconSize: [w, h],
+    iconAnchor: [w / 2, h / 2],
   })
+}
+
+function markerIconForKey(key: string, index: number) {
+  const role = roleFromKey(key)
+  if (role === 'start') return badgeIcon('start', '출발')
+  if (role === 'end') return badgeIcon('end', '도착')
+  // Junction / via: numbered neutral badge
+  const n = key.startsWith('chain-junction-')
+    ? Number(key.slice('chain-junction-'.length)) + 1
+    : index + 1
+  return badgeIcon('via', String(Number.isFinite(n) && n > 0 ? n : index + 1))
+}
+
+/** Waypoints: first=출발, last=도착, middle=numbered */
+function waypointIcon(index: number, total: number) {
+  if (total === 1) return badgeIcon('start', '출발')
+  if (index === 0) return badgeIcon('start', '출발')
+  if (index === total - 1) return badgeIcon('end', '도착')
+  return badgeIcon('via', String(index + 1))
+}
 
 function FitBounds({
   points,
@@ -179,14 +194,19 @@ export function MapCanvas({
       />
       <FitBounds points={fitPoints} route={fitRoute} fitRevision={fitRevision} />
       <FlyTo focus={focus} onFlew={setHighlight} />
-      {markers.map((m) => (
-        <Marker key={m.key} position={[m.lat, m.lng]} title={m.label} />
+      {markers.map((m, i) => (
+        <Marker
+          key={m.key}
+          position={[m.lat, m.lng]}
+          title={m.label}
+          icon={markerIconForKey(m.key, i)}
+        />
       ))}
       {waypoints.map((w, i) => (
         <Marker
           key={`wp-${i}-${w.lat}-${w.lng}`}
           position={[w.lat, w.lng]}
-          icon={waypointIcon(i + 1)}
+          icon={waypointIcon(i, waypoints.length)}
         />
       ))}
       {highlight && (

@@ -372,6 +372,52 @@ button.danger {
   background: #1e293b;
 }
 
+.marker-icon {
+  background: transparent;
+  border: 0;
+}
+
+.marker-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  font-family: 'Pretendard', 'Noto Sans KR', system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.marker-badge.start,
+.marker-badge.end {
+  min-width: 44px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: #fff;
+}
+
+.marker-badge.start {
+  background: #16a34a;
+}
+
+.marker-badge.end {
+  background: #dc2626;
+}
+
+.marker-badge.via {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #64748b;
+  color: #fff;
+  font-size: 12px;
+}
+
+/* Legacy class kept for any residual references */
 .waypoint-marker {
   background: transparent;
   border: 0;

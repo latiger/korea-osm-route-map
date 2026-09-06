@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { geocodeKorea } from '../api/nominatim'
+import { geocodeKoreaPreferJuso as geocodeKorea } from '../api/geocode'
 import { fetchRoute } from '../api/osrm'
 import type { GeocodeResult, LatLng, RouteResult, TravelProfile } from '../types'
 import { ProfileToggle } from './ProfileToggle'

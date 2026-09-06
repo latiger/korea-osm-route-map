@@ -433,123 +433,122 @@ export function OriginDestPanel({
           disabled={loading}
         />
 
-        <div className="od-row">
-          <label className="field od-field">
-            <span>출발</span>
-            <input
-              value={originText}
-              onChange={(e) => {
-                setOriginText(e.target.value)
-                setOrigin(null)
-                setOriginPickRequired(false)
-                searchOrigin(e.target.value)
-              }}
-              placeholder="예: 서울역"
-              autoComplete="off"
-            />
-            {originHits.length > 1 && !origin && (
-              <p className="hint field-hint">{originHits.length}곳 후보</p>
-            )}
-            {showOriginSuggest && (
-              <ul
-                className={
-                  originPickRequired ? 'suggest always' : 'suggest'
-                }
-              >
-                {originHits.map((h) => (
-                  <li key={h.id}>
-                    <button type="button" onClick={() => pickOrigin(h)}>
-                      {h.label}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </label>
+        <div className="kakao-od">
+          <div className="kakao-od-rows">
+            {/* 출발 */}
+            <div className="kakao-od-place">
+              <div className="kakao-od-spine">
+                <span className="kakao-od-dot origin" aria-hidden />
+                <span className="kakao-od-rail" aria-hidden />
+              </div>
+              <div className="kakao-od-field">
+                <input
+                  className="kakao-od-input"
+                  value={originText}
+                  onChange={(e) => {
+                    setOriginText(e.target.value)
+                    setOrigin(null)
+                    setOriginPickRequired(false)
+                    searchOrigin(e.target.value)
+                  }}
+                  placeholder="출발지를 입력하세요"
+                  aria-label="출발지"
+                  autoComplete="off"
+                />
+                {originHits.length > 1 && !origin && (
+                  <p className="hint field-hint">{originHits.length}곳 후보</p>
+                )}
+                {showOriginSuggest && (
+                  <ul
+                    className={
+                      originPickRequired ? 'suggest always' : 'suggest'
+                    }
+                  >
+                    {originHits.map((h) => (
+                      <li key={h.id}>
+                        <button type="button" onClick={() => pickOrigin(h)}>
+                          {h.label}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
 
-          <button
-            type="button"
-            className="icon-btn od-swap"
-            title="출발 ↔ 도착 바꾸기"
-            aria-label="출발과 도착 바꾸기"
-            onClick={swapOd}
-            disabled={loading}
-          >
-            ⇄
-          </button>
+            {/* swap on spine + 경유 추가 between origin and dest */}
+            <div className="kakao-od-place kakao-od-mid">
+              <div className="kakao-od-spine">
+                <button
+                  type="button"
+                  className="kakao-od-swap"
+                  title="출발 ↔ 도착 바꾸기"
+                  aria-label="출발과 도착 바꾸기"
+                  onClick={swapOd}
+                  disabled={loading}
+                >
+                  ⇕
+                </button>
+                <span className="kakao-od-rail" aria-hidden />
+              </div>
+              <div className="kakao-od-field kakao-od-mid-actions">
+                <button
+                  type="button"
+                  className="kakao-od-add-via"
+                  title="경유지 추가"
+                  aria-label="경유지 추가"
+                  onClick={addVia}
+                  disabled={loading}
+                >
+                  + 경유 추가
+                </button>
+              </div>
+            </div>
 
-          <label className="field od-field">
-            <span>도착</span>
-            <input
-              value={destText}
-              onChange={(e) => {
-                setDestText(e.target.value)
-                setDest(null)
-                setDestPickRequired(false)
-                searchDest(e.target.value)
-              }}
-              placeholder="예: 광화문"
-              autoComplete="off"
-            />
-            {destHits.length > 1 && !dest && (
-              <p className="hint field-hint">{destHits.length}곳 후보</p>
-            )}
-            {showDestSuggest && (
-              <ul
-                className={destPickRequired ? 'suggest always' : 'suggest'}
-              >
-                {destHits.map((h) => (
-                  <li key={h.id}>
-                    <button type="button" onClick={() => pickDest(h)}>
-                      {h.label}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </label>
-
-          <button
-            type="button"
-            className="icon-btn od-add-via"
-            title="경유지 추가"
-            aria-label="경유지 추가"
-            onClick={addVia}
-            disabled={loading}
-          >
-            +
-          </button>
-        </div>
-
-        {vias.length > 0 && (
-          <ul className="via-list">
+            {/* 경유 0..n */}
             {vias.map((v, i) => {
               const showSuggest = v.hits.length > 0 && !v.place
               return (
-                <li key={v.id} className="via-row">
-                  <label className="field via-field">
-                    <span>경유 {i + 1}</span>
-                    <input
-                      value={v.text}
-                      onChange={(e) => {
-                        const text = e.target.value
-                        setVias((prev) =>
-                          prev.map((slot) =>
-                            slot.id === v.id
-                              ? {
-                                  ...slot,
-                                  text,
-                                  place: null,
-                                  pickRequired: false,
-                                }
-                              : slot,
-                          ),
-                        )
-                        searchVia({ id: v.id, q: text })
-                      }}
-                      placeholder="경유지 검색"
-                      autoComplete="off"
-                    />
+                <div key={v.id} className="kakao-od-place kakao-od-via">
+                  <div className="kakao-od-spine">
+                    <span className="kakao-od-dot via" aria-hidden />
+                    <span className="kakao-od-rail" aria-hidden />
+                  </div>
+                  <div className="kakao-od-field">
+                    <div className="kakao-od-via-input-row">
+                      <input
+                        className="kakao-od-input"
+                        value={v.text}
+                        onChange={(e) => {
+                          const text = e.target.value
+                          setVias((prev) =>
+                            prev.map((slot) =>
+                              slot.id === v.id
+                                ? {
+                                    ...slot,
+                                    text,
+                                    place: null,
+                                    pickRequired: false,
+                                  }
+                                : slot,
+                            ),
+                          )
+                          searchVia({ id: v.id, q: text })
+                        }}
+                        placeholder="경유지를 입력하세요"
+                        aria-label={`경유지 ${i + 1}`}
+                        autoComplete="off"
+                      />
+                      <button
+                        type="button"
+                        className="kakao-od-via-remove"
+                        title="경유지 삭제"
+                        aria-label={`경유 ${i + 1} 삭제`}
+                        onClick={() => removeVia(v.id)}
+                      >
+                        ×
+                      </button>
+                    </div>
                     {v.hits.length > 1 && !v.place && (
                       <p className="hint field-hint">{v.hits.length}곳 후보</p>
                     )}
@@ -571,21 +570,52 @@ export function OriginDestPanel({
                         ))}
                       </ul>
                     )}
-                  </label>
-                  <button
-                    type="button"
-                    className="icon-btn via-remove"
-                    title="경유지 삭제"
-                    aria-label={`경유 ${i + 1} 삭제`}
-                    onClick={() => removeVia(v.id)}
-                  >
-                    ×
-                  </button>
-                </li>
+                  </div>
+                </div>
               )
             })}
-          </ul>
-        )}
+
+            {/* 도착 */}
+            <div className="kakao-od-place kakao-od-dest">
+              <div className="kakao-od-spine">
+                <span className="kakao-od-dot dest" aria-hidden />
+              </div>
+              <div className="kakao-od-field">
+                <input
+                  className="kakao-od-input"
+                  value={destText}
+                  onChange={(e) => {
+                    setDestText(e.target.value)
+                    setDest(null)
+                    setDestPickRequired(false)
+                    searchDest(e.target.value)
+                  }}
+                  placeholder="도착지를 입력하세요"
+                  aria-label="도착지"
+                  autoComplete="off"
+                />
+                {destHits.length > 1 && !dest && (
+                  <p className="hint field-hint">{destHits.length}곳 후보</p>
+                )}
+                {showDestSuggest && (
+                  <ul
+                    className={
+                      destPickRequired ? 'suggest always' : 'suggest'
+                    }
+                  >
+                    {destHits.map((h) => (
+                      <li key={h.id}>
+                        <button type="button" onClick={() => pickDest(h)}>
+                          {h.label}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
 
         <button type="submit" className="primary" disabled={loading}>
           {loading ? '경로 계산 중…' : '경로 찾기'}

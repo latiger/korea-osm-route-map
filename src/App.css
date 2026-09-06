@@ -401,7 +401,7 @@ button.danger {
 }
 
 .marker-badge.start {
-  background: #16a34a;
+  background: #1a73e8;
 }
 
 .marker-badge.end {
@@ -635,25 +635,222 @@ button.danger {
 }
 
 
-/* ── OD one-line row (출발 / swap / 도착 / +) ── */
-.od-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 8px;
+/* ── Kakao Map–style OD place card ── */
+.kakao-od {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  padding: 10px 12px 10px 8px;
+  color: #1e293b;
 }
 
-.od-field {
-  flex: 1 1 120px;
+.kakao-od-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.kakao-od-place {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 8px;
+  align-items: stretch;
+  min-height: 40px;
+}
+
+.kakao-od-spine {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 12px;
+}
+
+.kakao-od-rail {
+  flex: 1;
+  width: 2px;
+  min-height: 8px;
+  margin-top: 4px;
+  background: #e2e8f0;
+  border-radius: 1px;
+}
+
+.kakao-od-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  box-shadow: 0 0 0 3px #fff;
+  z-index: 1;
+}
+
+.kakao-od-dot.origin {
+  background: #1a73e8;
+}
+
+.kakao-od-dot.via {
+  background: #94a3b8;
+  width: 10px;
+  height: 10px;
+}
+
+.kakao-od-dot.dest {
+  background: #ef4444;
+}
+
+.kakao-od-field {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 2px 0;
+}
+
+.kakao-od-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #0f172a;
+  font: inherit;
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.kakao-od-input::placeholder {
+  color: #94a3b8;
+}
+
+.kakao-od-input:focus {
+  outline: 2px solid #1a73e8;
+  background: #fff;
+}
+
+.kakao-od-mid {
+  min-height: 36px;
+}
+
+.kakao-od-mid .kakao-od-spine {
+  padding-top: 4px;
+  justify-content: flex-start;
+}
+
+.kakao-od-swap {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #475569;
+  font-size: 0.95rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.kakao-od-swap:hover:not(:disabled) {
+  border-color: #1a73e8;
+  color: #1a73e8;
+  background: #eff6ff;
+}
+
+.kakao-od-swap:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 1px;
+}
+
+.kakao-od-mid-actions {
+  justify-content: center;
+  padding: 0;
+}
+
+.kakao-od-add-via {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  width: auto;
+}
+
+.kakao-od-add-via:hover:not(:disabled) {
+  color: #1a73e8;
+  background: #eff6ff;
+}
+
+.kakao-od-via-input-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.kakao-od-via-input-row .kakao-od-input {
+  flex: 1;
   min-width: 0;
 }
 
+.kakao-od-via-remove {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 1.15rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.kakao-od-via-remove:hover:not(:disabled) {
+  color: #ef4444;
+  background: #fef2f2;
+}
+
+.kakao-od .field-hint {
+  color: #1a73e8;
+  padding: 0 4px;
+}
+
+.kakao-od .suggest {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  color: #0f172a;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+}
+
+.kakao-od .suggest button {
+  color: #0f172a;
+}
+
+.kakao-od .suggest button:hover,
+.kakao-od .suggest button.selected {
+  background: #eff6ff;
+}
+
+/* Legacy icon-btn kept for any residual references */
 .icon-btn {
   flex: 0 0 auto;
   width: 40px;
   height: 40px;
   padding: 0;
-  margin-top: 22px;
   border-radius: 10px;
   border: 1px solid #475569;
   background: #0f172a;
@@ -674,45 +871,6 @@ button.danger {
 .icon-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-
-.od-swap {
-  font-size: 1.25rem;
-}
-
-.od-add-via {
-  font-size: 1.4rem;
-  font-weight: 600;
-}
-
-.via-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.via-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.via-field {
-  flex: 1;
-  min-width: 0;
-}
-
-.via-remove {
-  margin-top: 22px;
-  color: var(--danger);
-}
-
-.via-remove:hover:not(:disabled) {
-  background: #3f1d1d;
-  border-color: var(--danger);
 }
 
 /* ── Map place-mode control (under Leaflet zoom) ── */

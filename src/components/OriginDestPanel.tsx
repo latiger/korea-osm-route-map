@@ -653,12 +653,7 @@ export function OriginDestPanel({
         <button type="submit" className="primary" disabled={loading}>
           {loading ? '경로 계산 중…' : '경로 찾기'}
         </button>
-        {(route != null ||
-          origin != null ||
-          dest != null ||
-          vias.length > 0 ||
-          originText.trim() !== '' ||
-          destText.trim() !== '') && (
+        {route != null && (
           <button
             type="button"
             className="danger-outline"

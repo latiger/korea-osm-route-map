@@ -281,10 +281,7 @@ export function RoadNamePanel({
         <button type="submit" className="primary" disabled={loading}>
           {loading ? '검색 중…' : '도로 검색 · 경로'}
         </button>
-        {(route != null ||
-          chain.length > 0 ||
-          matches.length > 0 ||
-          roadText.trim() !== '') && (
+        {route != null && (
           <button
             type="button"
             className="danger-outline"

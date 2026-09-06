@@ -42,6 +42,13 @@ function App() {
     setFocusLocation({ lat: ll.lat, lng: ll.lng })
   }, [])
 
+  const onPanelReset = useCallback(() => {
+    setFocusLocation(null)
+    setPlaceMode(null)
+    setMapPick(null)
+    setFitRevision((n) => n + 1)
+  }, [])
+
   const showFullRoute = useCallback(() => {
     setFocusLocation(null)
     setFitRevision((n) => n + 1)
@@ -100,6 +107,7 @@ function App() {
               onMarkersChange={onMarkersChange}
               onRouteChange={onRouteChange}
               onFocusLocation={onFocusLocation}
+              onReset={onPanelReset}
               mapPick={mapPick}
               placeMode={placeMode}
             />
@@ -111,6 +119,7 @@ function App() {
               onMarkersChange={onMarkersChange}
               onRouteChange={onRouteChange}
               onFocusLocation={onFocusLocation}
+              onReset={onPanelReset}
             />
           )}
         </aside>

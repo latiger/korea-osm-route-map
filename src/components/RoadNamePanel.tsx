@@ -17,6 +17,8 @@ interface Props {
   onMarkersChange: (markers: Array<LatLng & { key: string; label?: string }>) => void
   onRouteChange: (route: RouteResult | null) => void
   onFocusLocation?: (ll: LatLng) => void
+  /** Full panel reset (App can clear focus / fit) */
+  onReset?: () => void
 }
 
 type ChainAction = 'prepend' | 'append' | 'replace'
@@ -27,6 +29,7 @@ export function RoadNamePanel({
   onMarkersChange,
   onRouteChange,
   onFocusLocation,
+  onReset,
 }: Props) {
   const [roadText, setRoadText] = useState('2번국도')
   const [matches, setMatches] = useState<RoadMatch[]>([])
@@ -121,12 +124,21 @@ export function RoadNamePanel({
     applyChain([])
   }
 
-  function clearRoute() {
+  function clearAll() {
     abortRef.current?.abort()
     abortRef.current = null
+    setRoadText('')
+    setMatches([])
+    setChain([])
+    setActionTargetId(null)
     setRoute(null)
     setError(null)
+    setDataNote(null)
     setLoading(false)
+    metaRef.current = null
+    onMarkersChange([])
+    onRouteChange(null)
+    onReset?.()
   }
 
   async function handleSearch(e: FormEvent) {
@@ -269,11 +281,14 @@ export function RoadNamePanel({
         <button type="submit" className="primary" disabled={loading}>
           {loading ? '검색 중…' : '도로 검색 · 경로'}
         </button>
-        {route != null && (
+        {(route != null ||
+          chain.length > 0 ||
+          matches.length > 0 ||
+          roadText.trim() !== '') && (
           <button
             type="button"
             className="danger-outline"
-            onClick={clearRoute}
+            onClick={clearAll}
             disabled={loading}
           >
             경로지우기

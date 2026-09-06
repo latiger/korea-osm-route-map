@@ -36,6 +36,8 @@ interface Props {
   ) => void
   onRouteChange: (route: RouteResult | null) => void
   onFocusLocation?: (ll: LatLng) => void
+  /** Full panel reset (App can clear focus / placeMode / fit) */
+  onReset?: () => void
   /** Map place-mode pick after reverse-geocode (App → panel) */
   mapPick?: MapResolvedPick | null
   /** Armed map place-mode (출발/도착/경유) for row highlight */
@@ -54,6 +56,7 @@ export function OriginDestPanel({
   onMarkersChange,
   onRouteChange,
   onFocusLocation,
+  onReset,
   mapPick = null,
   placeMode = null,
 }: Props) {
@@ -356,12 +359,24 @@ export function OriginDestPanel({
     return { place: null, hits, needPick: true }
   }
 
-  function clearRoute() {
+  function clearAll() {
     abortRef.current?.abort()
     abortRef.current = null
+    setOriginText('')
+    setDestText('')
+    setOriginHits([])
+    setDestHits([])
+    setOrigin(null)
+    setDest(null)
+    setOriginPickRequired(false)
+    setDestPickRequired(false)
+    setVias([])
     setRoute(null)
     setError(null)
     setLoading(false)
+    onMarkersChange([])
+    onRouteChange(null)
+    onReset?.()
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -638,11 +653,16 @@ export function OriginDestPanel({
         <button type="submit" className="primary" disabled={loading}>
           {loading ? '경로 계산 중…' : '경로 찾기'}
         </button>
-        {route != null && (
+        {(route != null ||
+          origin != null ||
+          dest != null ||
+          vias.length > 0 ||
+          originText.trim() !== '' ||
+          destText.trim() !== '') && (
           <button
             type="button"
             className="danger-outline"
-            onClick={clearRoute}
+            onClick={clearAll}
             disabled={loading}
           >
             경로지우기

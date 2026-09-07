@@ -102,7 +102,7 @@ function parseSectionsToTraffic(
   const segments: RouteSegment[] = []
   for (const sec of sections) {
     const name = sec.name?.trim() || undefined
-    // Omit ferry / open-water sailing legs from drawable traffic.
+    // Ferry dropped, bridges kept (대교/교량/다리 beat 페리/항로 labels).
     if (looksLikeFerryName(name)) continue
     const start = sec.pointIndex ?? 0
     const count = sec.pointCount ?? 0
@@ -256,8 +256,8 @@ export async function fetchNaverDrivingRoute(
     looksLikeFerryName(sec.name?.trim()),
   )
   const trafficSegments = parseSectionsToTraffic(rawPath, route.section)
-  // When ferry sections were dropped, restitch coordinates from remaining
-  // traffic so open-water legs leave empty gaps instead of chords.
+  // When ferry sections were dropped (bridges kept), restitch coordinates
+  // from remaining traffic so open-water legs leave empty gaps, not chords.
   const coordinates =
     omittedFerry && trafficSegments && trafficSegments.length > 0
       ? coordinatesFromTraffic(trafficSegments)

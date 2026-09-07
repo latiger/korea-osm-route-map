@@ -1,4 +1,4 @@
-import { looksLikeFerryName } from './ferryHints'
+import { looksLikeBridgeName, looksLikeFerryName } from './ferryHints'
 import type { LatLng } from '../types'
 
 /**
@@ -67,13 +67,17 @@ export function splitPolylineOnJumps(
 
 /**
  * Heuristic for ferry / open-water chords between islands:
- * long, near-straight, sparsely sampled — or an explicit ferry name hint.
+ * long, near-straight, sparsely sampled — or an explicit ferry-only name.
+ * Bridge-named legs (대교/교량/다리) always stay; ferry dropped, bridges kept.
  * Sinuous coastal roads (path ≫ chord) and dense bridge polylines stay.
  */
 export function looksLikeOpenWaterChord(
   points: LatLng[],
   name?: string | null,
 ): boolean {
+  // Bridges always stay — never drop 대교/교량/다리 even if geometry is straight.
+  if (looksLikeBridgeName(name)) return false
+  // Name-based drop only for ferry-only labels (bridge cues already excluded).
   if (looksLikeFerryName(name)) return true
   if (points.length < 2) return false
   const pathLen = pathLengthMeters(points)

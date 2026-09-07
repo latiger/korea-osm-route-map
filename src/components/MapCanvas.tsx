@@ -431,7 +431,7 @@ export function MapCanvas({
 
   const trafficRaw =
     trafficSegments?.filter((s) => s.coordinates.length > 1) ?? []
-  /** Skip whole ferry-named / open-water traffic segments before drawing. */
+  /** Skip ferry / open-water traffic; keep bridges (대교 등) and land roads. */
   const traffic = trafficRaw.filter(
     (s) => !looksLikeOpenWaterChord(s.coordinates, s.name),
   )
@@ -466,7 +466,7 @@ export function MapCanvas({
   const gapBridges = (useTraffic ? buildTrafficGapBridges(traffic) : []).filter(
     (b) => !looksLikeOpenWaterChord([b.from, b.to]),
   )
-  /** Traffic draw pieces: jump-split then drop open-water chords. */
+  /** Traffic draw pieces: jump-split; drop ferry chords, keep bridges. */
   const trafficPieces = useTraffic
     ? traffic.flatMap((seg, i) =>
         dropOpenWaterPieces(splitPolylineOnJumps(seg.coordinates), seg.name).map(

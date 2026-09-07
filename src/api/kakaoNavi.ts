@@ -82,7 +82,7 @@ function parseRoadsToSegments(sections: KakaoSection[]): RouteSegment[] {
   for (const section of sections) {
     for (const road of section.roads ?? []) {
       const name = road.name?.trim() || undefined
-      // Omit ferry / open-water sailing legs from drawable traffic + stitch path.
+      // Ferry dropped, bridges kept (대교/교량/다리 beat 페리/항로 labels).
       if (looksLikeFerryName(name)) continue
       const coordinates = vertexesToLatLng(road.vertexes)
       if (coordinates.length < 2) continue

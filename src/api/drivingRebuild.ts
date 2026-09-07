@@ -3,7 +3,11 @@ import {
   listOfficialSegmentGaps,
   orderAndOrientSegments,
 } from './nationalRoads'
-import { officialLandUnderlay } from './openWaterFilter'
+import { looksLikeBridgeName, looksLikeFerryName } from './ferryHints'
+import {
+  looksLikeOpenWaterChord,
+  officialLandUnderlay,
+} from './openWaterFilter'
 import { fetchRoute } from './route'
 import type {
   LatLng,
@@ -26,6 +30,12 @@ const MAX_SAMPLES = 80
 const CHUNK_JOIN_GAP_M = 5
 /** Densify traffic: real mini-route when consecutive segment tips exceed this. */
 const TRAFFIC_DENSIFY_GAP_M = 30
+/**
+ * Max tip gap to refill after ferry segments were dropped.
+ * Real bridges (e.g. 중앙대교) sit in the ~8–15 km band; longer holes stay empty
+ * (true island ferries). Ferry dropped, bridges kept.
+ */
+const FERRY_HOLE_REFILL_MAX_M = 15_000
 
 function haversineMeters(a: LatLng, b: LatLng): number {
   const R = 6371000
@@ -176,8 +186,58 @@ function appendCoordsSkippingDup(target: LatLng[], coords: LatLng[]): void {
 }
 
 /**
- * When consecutive traffic segment endpoints are >TRAFFIC_DENSIFY_GAP_M apart,
- * insert a real mini driving fill (same provider) instead of leaving a hole.
+ * Keep a tip-to-tip densify fill when it is not ferry-only, or when it looks
+ * like a bridge (대교 name) / dense drivable path. Ferry dropped, bridges kept.
+ */
+function keepDensifyFill(
+  fill: RouteResult,
+  fallbackName?: string,
+): RouteSegment[] {
+  const kept: RouteSegment[] = []
+  for (const fs of fill.trafficSegments ?? []) {
+    if (fs.coordinates.length < 2) continue
+    // Navi parsers already omit ferry-only names; bridge cues survive.
+    if (looksLikeFerryName(fs.name)) continue
+    kept.push(fs)
+  }
+  if (kept.length) return kept
+
+  const coords = fill.coordinates ?? []
+  if (coords.length < 2) return []
+
+  const nameBits = [
+    fallbackName,
+    ...(fill.trafficSegments ?? []).map((s) => s.name),
+    ...(fill.steps ?? []).map((s) => s.name || s.label),
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  // Keep bridge-named or non-open-water geometry (dense path / winding).
+  if (
+    looksLikeBridgeName(nameBits) ||
+    !looksLikeOpenWaterChord(coords, nameBits || fallbackName)
+  ) {
+    const prevTraffic = fill.trafficSegments?.[0]
+    return [
+      {
+        coordinates: coords,
+        trafficState: prevTraffic?.trafficState ?? 0,
+        trafficSpeed: prevTraffic?.trafficSpeed,
+        name: looksLikeBridgeName(nameBits)
+          ? nameBits
+          : prevTraffic?.name ?? fallbackName,
+      },
+    ]
+  }
+  return []
+}
+
+/**
+ * When consecutive traffic segment endpoints are >TRAFFIC_DENSIFY_GAP_M apart
+ * and within FERRY_HOLE_REFILL_MAX_M, insert a real mini driving fill (same
+ * provider) instead of leaving a hole. After ferry legs are omitted, land tips
+ * ~8–15 km apart are typically bridges — car routing should win over ferry.
  */
 async function densifyTrafficSegments(
   segments: RouteSegment[],
@@ -192,31 +252,25 @@ async function densifyTrafficSegments(
       const prev = out[out.length - 1]!
       const aEnd = prev.coordinates[prev.coordinates.length - 1]
       const bStart = seg.coordinates[0]
+      const gap =
+        aEnd && bStart ? haversineMeters(aEnd, bStart) : 0
       if (
         aEnd &&
         bStart &&
-        haversineMeters(aEnd, bStart) > TRAFFIC_DENSIFY_GAP_M
+        gap > TRAFFIC_DENSIFY_GAP_M &&
+        gap <= FERRY_HOLE_REFILL_MAX_M
       ) {
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
         try {
+          // Always refill mid-length holes; bridges beat ferry for car routing.
           const fill = await fetchRoute(
             [aEnd, bStart],
             'driving',
             signal,
             provider,
           )
-          if (fill.trafficSegments?.length) {
-            for (const fs of fill.trafficSegments) {
-              if (fs.coordinates.length > 1) out.push(fs)
-            }
-          } else if (fill.coordinates && fill.coordinates.length > 1) {
-            out.push({
-              coordinates: fill.coordinates,
-              trafficState: prev.trafficState,
-              trafficSpeed: prev.trafficSpeed,
-              name: prev.name,
-            })
-          }
+          const kept = keepDensifyFill(fill, prev.name ?? seg.name)
+          for (const fs of kept) out.push(fs)
         } catch (e) {
           if ((e as Error).name === 'AbortError') throw e
           // Leave hole rather than inventing a straight chord.
@@ -293,7 +347,8 @@ export async function stitchDrivingResults(
       const prevTip = coordinates[coordinates.length - 1]!
       const nextStart = coords[0]!
       const gap = haversineMeters(prevTip, nextStart)
-      if (gap > CHUNK_JOIN_GAP_M) {
+      // Refill stitch holes (incl. after ferry drop); bridges within ~15 km win.
+      if (gap > CHUNK_JOIN_GAP_M && gap <= FERRY_HOLE_REFILL_MAX_M) {
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
         try {
           const fill = await fetchRoute(
@@ -302,22 +357,15 @@ export async function stitchDrivingResults(
             signal,
             provider,
           )
-          const fillCoords = fill.coordinates ?? []
-          if (fillCoords.length >= 2) {
-            appendCoordsSkippingDup(coordinates, fillCoords)
+          const prevTraffic = trafficSegments[trafficSegments.length - 1]
+          const kept = keepDensifyFill(fill, prevTraffic?.name)
+          if (kept.length) {
+            for (const fs of kept) {
+              appendCoordsSkippingDup(coordinates, fs.coordinates)
+              trafficSegments.push(fs)
+            }
             distanceMeters += fill.distanceMeters
             durationSeconds += fill.durationSeconds
-          }
-          if (fill.trafficSegments?.length) {
-            trafficSegments.push(...fill.trafficSegments)
-          } else if (fillCoords.length > 1) {
-            const prevTraffic = trafficSegments[trafficSegments.length - 1]
-            trafficSegments.push({
-              coordinates: fillCoords,
-              trafficState: prevTraffic?.trafficState ?? 0,
-              trafficSpeed: prevTraffic?.trafficSpeed,
-              name: prevTraffic?.name,
-            })
           }
         } catch (e) {
           if ((e as Error).name === 'AbortError') throw e
@@ -437,9 +485,9 @@ export async function rebuildOfficialAsDriving(
 
   // Keep a light road-name prefix on steps for multi-road chains
   const roadName = match.name
-  // Official land centerlines as underlay: after ferry legs are dropped from
-  // Kakao/Naver, island roads still appear from MOLIT geometry (open-water
-  // chords between islands are filtered out).
+  // Official land centerlines as underlay: ferry legs are dropped from
+  // Kakao/Naver, bridges are kept; island roads still appear from MOLIT
+  // geometry (open-water chords between islands are filtered out).
   const landUnderlay = officialLandUnderlay(ordered)
   return {
     ...stitched,

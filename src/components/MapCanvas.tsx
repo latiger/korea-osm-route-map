@@ -16,24 +16,64 @@ export const SEOUL_CENTER: LatLng = { lat: 37.5665, lng: 126.978 }
 export const DEFAULT_ZOOM = 12
 
 const ROUTE_STYLE = { color: '#2563eb', weight: 5, opacity: 0.85 }
-/** Straight 2-point gap fallback — dashed slate */
-const CONNECTOR_FALLBACK_STYLE = {
-  color: '#64748b',
-  weight: 4,
-  opacity: 0.85,
-  dashArray: '6 8',
-  lineCap: 'round' as const,
-  lineJoin: 'round' as const,
-}
-/** Routed gap bridge (Kakao/OSRM polyline with >2 points) — solid amber */
-const CONNECTOR_ROUTED_STYLE = {
-  color: '#f59e0b',
-  weight: 5,
-  opacity: 0.9,
-  lineCap: 'round' as const,
-  lineJoin: 'round' as const,
-}
 const TRAFFIC_WEIGHT = 6
+
+function latLngDist2(a: LatLng, b: LatLng): number {
+  const dLat = a.lat - b.lat
+  const dLng = a.lng - b.lng
+  return dLat * dLat + dLng * dLng
+}
+
+/** Match connector color to nearby traffic segment, else main route blue. */
+function connectorColor(line: LatLng[], traffic: RouteSegment[]): string {
+  if (traffic.length === 0) return ROUTE_STYLE.color
+
+  const midIdx = Math.floor(line.length / 2)
+  const ref = line[midIdx] ?? line[0]
+  if (!ref) return ROUTE_STYLE.color
+
+  let bestSeg: RouteSegment | null = null
+  let bestDist = Infinity
+  for (const seg of traffic) {
+    const coords = seg.coordinates
+    if (coords.length === 0) continue
+    const start = coords[0]
+    const end = coords[coords.length - 1]
+    const d = Math.min(latLngDist2(ref, start), latLngDist2(ref, end))
+    if (d < bestDist) {
+      bestDist = d
+      bestSeg = seg
+    }
+  }
+
+  if (bestSeg) return trafficStateColor(bestSeg.trafficState)
+  // Fallback: first/last traffic segment color or main blue
+  const fallback = traffic[0] ?? traffic[traffic.length - 1]
+  return fallback
+    ? trafficStateColor(fallback.trafficState)
+    : ROUTE_STYLE.color
+}
+
+/**
+ * Gap connectors share route/traffic color family.
+ * 2-point straight gaps stay dashed; routed (>2 pts) are solid.
+ */
+function connectorPathOptions(
+  line: LatLng[],
+  traffic: RouteSegment[],
+): L.PathOptions {
+  const color = connectorColor(line, traffic)
+  const useTrafficLook = traffic.length > 0
+  const straightGap = line.length <= 2
+  return {
+    color,
+    weight: useTrafficLook ? TRAFFIC_WEIGHT : ROUTE_STYLE.weight,
+    opacity: useTrafficLook ? 0.9 : ROUTE_STYLE.opacity,
+    ...(straightGap ? { dashArray: '6 8' } : {}),
+    lineCap: 'round',
+    lineJoin: 'round',
+  }
+}
 const FOCUS_ZOOM = 18
 
 type MarkerRole = 'start' | 'end' | 'via'
@@ -273,7 +313,7 @@ export interface MapCanvasProps {
   routeLineStrings?: LatLng[][]
   /**
    * Gap bridges between official MultiLineString parts.
-   * 2-point lines = dashed straight fallback; >2 points = solid routed path.
+   * Color matches nearby traffic (or ROUTE_STYLE); 2-point = dashed, >2 = solid.
    */
   connectorLineStrings?: LatLng[][]
   /** Kakao traffic-colored road segments (preferred when present) */
@@ -398,9 +438,7 @@ export function MapCanvas({
         <Polyline
           key={`connector-line-${i}`}
           positions={line.map((p) => [p.lat, p.lng] as [number, number])}
-          pathOptions={
-            line.length > 2 ? CONNECTOR_ROUTED_STYLE : CONNECTOR_FALLBACK_STYLE
-          }
+          pathOptions={connectorPathOptions(line, traffic)}
         />
       ))}
       {useTraffic &&

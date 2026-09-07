@@ -11,6 +11,20 @@ interface Props {
   onStepClick?: (ll: LatLng) => void
 }
 
+/** Kakao Navi numeric OD types — do not map display name to 출발지/도착지. */
+function isKakaoOdEndpointType(type: string | undefined): boolean {
+  const t = (type ?? '').toLowerCase()
+  return t === '100' || t === '101' || t === '1000'
+}
+
+function isOdEndpointDisplayText(text: string | undefined): boolean {
+  const s = (text ?? '').trim()
+  if (!s) return false
+  if (/출발지|목적지|도착지/.test(s)) return true
+  if (s === '출발' || s === '도착') return true
+  return false
+}
+
 export function RouteSummary({ route, onStepClick }: Props) {
   const [open, setOpen] = useState(true)
 
@@ -50,8 +64,16 @@ export function RouteSummary({ route, onStepClick }: Props) {
         <ol className="route-steps" aria-label="경로 단계">
           {list.map((step, i) => {
             const symbol = maneuverSymbol(step.type, step.modifier)
+            const rawName = (step.name ?? '').trim()
+            // Prefer filtering OD at source; if type 100/101 leaks through, never
+            // show 출발지/목적지 as the road name.
+            const name =
+              rawName &&
+              !(isKakaoOdEndpointType(step.type) && isOdEndpointDisplayText(rawName))
+                ? rawName
+                : ''
             const road =
-              step.name ||
+              name ||
               (step.type === 'arrive'
                 ? '도착지'
                 : step.type === 'depart'

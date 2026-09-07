@@ -91,10 +91,32 @@ function insertIndexForGap(baseSteps: RouteStep[], gap: RouteGapInfo): number {
   return baseSteps.length
 }
 
+/** Kakao Navi OD endpoint types (출발지/목적지/경유지) + OSRM depart/arrive. */
+function isConnectorOdEndpointType(type: string | undefined): boolean {
+  const t = (type ?? '').toLowerCase()
+  return (
+    t === 'depart' ||
+    t === 'arrive' ||
+    t === '100' ||
+    t === '101' ||
+    t === '1000'
+  )
+}
+
+/** Origin/destination wording that should not appear mid-route after 「이어서 연결」. */
+function isConnectorOdEndpointText(text: string | undefined): boolean {
+  const s = (text ?? '').trim()
+  if (!s) return false
+  if (/출발지|목적지|도착지/.test(s)) return true
+  // Exact OD endpoint labels only — keep real turn text that merely mentions 출발/도착.
+  if (s === '출발' || s === '도착') return true
+  return false
+}
+
 /**
  * Insert connector turn-by-turn maneuvers at the gap's place in the path
  * (not blindly appended at the end). No section header — list shows only
- * the connector's navigation steps (depart/arrive dropped).
+ * the connector's navigation steps (OD endpoints / 출발지·목적지 dropped).
  */
 function appendConnectorSteps(
   baseSteps: RouteStep[],
@@ -102,8 +124,10 @@ function appendConnectorSteps(
   gap: RouteGapInfo,
 ): RouteStep[] {
   const maneuvers = (conn.steps ?? []).filter((s) => {
-    const t = (s.type ?? '').toLowerCase()
-    return t !== 'depart' && t !== 'arrive'
+    if (isConnectorOdEndpointType(s.type)) return false
+    if (isConnectorOdEndpointText(s.label) || isConnectorOdEndpointText(s.name))
+      return false
+    return true
   })
   if (!maneuvers.length) return baseSteps
   const insertAt = insertIndexForGap(baseSteps, gap)

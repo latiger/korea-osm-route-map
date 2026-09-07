@@ -19,10 +19,8 @@ const ROUTE_STYLE = { color: '#2563eb', weight: 5, opacity: 0.85 }
 const TRAFFIC_WEIGHT = 6
 /** Bridge consecutive traffic segments when endpoints are farther than this. */
 const TRAFFIC_GAP_BRIDGE_M = 30
-/** Bridge consecutive numbered step markers when farther than this (skip micro-gaps). */
-const STEP_BRIDGE_MIN_M = 30
-/** Soft cap: skip absurd diagonals across Korea; island gaps of a few km still draw. */
-const STEP_BRIDGE_MAX_M = 80_000
+/** Only short stitch holes — never long straight chords across the map. */
+const TRAFFIC_GAP_BRIDGE_MAX_M = 500
 
 function latLngDist2(a: LatLng, b: LatLng): number {
   const dLat = a.lat - b.lat
@@ -54,41 +52,13 @@ function buildTrafficGapBridges(traffic: RouteSegment[]): TrafficGapBridge[] {
     const aEnd = segA.coordinates[segA.coordinates.length - 1]
     const bStart = segB.coordinates[0]
     if (!aEnd || !bStart) continue
-    if (haversineMeters(aEnd, bStart) <= TRAFFIC_GAP_BRIDGE_M) continue
+    const d = haversineMeters(aEnd, bStart)
+    // Short stitch only; long holes are filled in drivingRebuild with real routes.
+    if (d <= TRAFFIC_GAP_BRIDGE_M || d > TRAFFIC_GAP_BRIDGE_MAX_M) continue
     bridges.push({
       from: aEnd,
       to: bStart,
       color: trafficStateColor(segA.trafficState),
-    })
-  }
-  return bridges
-}
-
-type StepBridge = { from: LatLng; to: LatLng; color: string; key: string }
-
-/**
- * Connect consecutive numbered step badges when geometry/traffic omit the stretch.
- * Prefer nearby traffic color; else ROUTE_STYLE blue. Solid, same weight as traffic.
- */
-function buildStepBridges(
-  steps: Array<{ n: number; lat: number; lng: number }>,
-  traffic: RouteSegment[],
-): StepBridge[] {
-  const sorted = [...steps].sort((a, b) => a.n - b.n)
-  const bridges: StepBridge[] = []
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const a = sorted[i]!
-    const b = sorted[i + 1]!
-    const from = { lat: a.lat, lng: a.lng }
-    const to = { lat: b.lat, lng: b.lng }
-    const d = haversineMeters(from, to)
-    if (d <= STEP_BRIDGE_MIN_M || d > STEP_BRIDGE_MAX_M) continue
-    const line = [from, to]
-    bridges.push({
-      from,
-      to,
-      color: connectorColor(line, traffic),
-      key: `step-bridge-${a.n}-${b.n}`,
     })
   }
   return bridges
@@ -438,17 +408,14 @@ export function MapCanvas({
   const routeUnderlayColor = useTraffic
     ? connectorColor(route, traffic)
     : ROUTE_STYLE.color
-  /** Fill gaps between consecutive traffic pieces (works even if route is empty). */
+  /** Fill short stitch holes between consecutive traffic pieces. */
   const gapBridges = useTraffic ? buildTrafficGapBridges(traffic) : []
-  /** Bridge numbered step badges when coords/traffic omit that stretch. */
-  const stepBridges = buildStepBridges(stepMarkers, traffic)
   const fitRoute = [
     ...(useTraffic ? traffic.flatMap((s) => s.coordinates) : []),
     ...(useMulti ? multi.flat() : []),
     ...connectors.flat(),
     ...(showRouteUnderlay ? route : []),
     ...gapBridges.flatMap((b) => [b.from, b.to]),
-    ...stepBridges.flatMap((b) => [b.from, b.to]),
     ...(!useTraffic && !useMulti && !showRouteUnderlay ? route : []),
   ]
 
@@ -539,22 +506,6 @@ export function MapCanvas({
       {gapBridges.map((b, i) => (
         <Polyline
           key={`traffic-gap-bridge-${i}`}
-          positions={[
-            [b.from.lat, b.from.lng] as [number, number],
-            [b.to.lat, b.to.lng] as [number, number],
-          ]}
-          pathOptions={{
-            color: b.color,
-            weight: TRAFFIC_WEIGHT,
-            opacity: 0.9,
-            lineCap: 'round',
-            lineJoin: 'round',
-          }}
-        />
-      ))}
-      {stepBridges.map((b) => (
-        <Polyline
-          key={b.key}
           positions={[
             [b.from.lat, b.from.lng] as [number, number],
             [b.to.lat, b.to.lng] as [number, number],

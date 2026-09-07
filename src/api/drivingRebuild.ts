@@ -21,6 +21,10 @@ const POINTS_PER_CALL = MAX_VIAS + 2
 const SAMPLE_EVERY_M = 12_000
 /** Soft cap on samples so very long roads do not explode API call count. */
 const MAX_SAMPLES = 80
+/** Fill chunk-join holes when adjacent part endpoints are farther than this. */
+const CHUNK_JOIN_GAP_M = 5
+/** Densify traffic: real mini-route when consecutive segment tips exceed this. */
+const TRAFFIC_DENSIFY_GAP_M = 30
 
 function haversineMeters(a: LatLng, b: LatLng): number {
   const R = 6371000
@@ -154,24 +158,123 @@ function isEndpointStep(s: RouteStep): boolean {
   return /출발|도착|목적지|경유지/.test(label) && label.length < 12
 }
 
-/** Merge sequential driving API results into one RouteResult. */
-export function stitchDrivingResults(
+function samePoint(a: LatLng, b: LatLng): boolean {
+  return a.lat === b.lat && a.lng === b.lng
+}
+
+function appendCoordsSkippingDup(target: LatLng[], coords: LatLng[]): void {
+  if (!coords.length) return
+  const start =
+    target.length && samePoint(target[target.length - 1]!, coords[0]!) ? 1 : 0
+  for (let i = start; i < coords.length; i++) {
+    const c = coords[i]!
+    const prev = target[target.length - 1]
+    if (prev && samePoint(prev, c)) continue
+    target.push(c)
+  }
+}
+
+/**
+ * When consecutive traffic segment endpoints are >TRAFFIC_DENSIFY_GAP_M apart,
+ * insert a real mini driving fill (same provider) instead of leaving a hole.
+ */
+async function densifyTrafficSegments(
+  segments: RouteSegment[],
+  provider: RoutingProvider,
+  signal?: AbortSignal,
+): Promise<RouteSegment[]> {
+  if (segments.length < 2) return segments
+  const out: RouteSegment[] = []
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]!
+    if (out.length) {
+      const prev = out[out.length - 1]!
+      const aEnd = prev.coordinates[prev.coordinates.length - 1]
+      const bStart = seg.coordinates[0]
+      if (
+        aEnd &&
+        bStart &&
+        haversineMeters(aEnd, bStart) > TRAFFIC_DENSIFY_GAP_M
+      ) {
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+        try {
+          const fill = await fetchRoute(
+            [aEnd, bStart],
+            'driving',
+            signal,
+            provider,
+          )
+          if (fill.trafficSegments?.length) {
+            for (const fs of fill.trafficSegments) {
+              if (fs.coordinates.length > 1) out.push(fs)
+            }
+          } else if (fill.coordinates && fill.coordinates.length > 1) {
+            out.push({
+              coordinates: fill.coordinates,
+              trafficState: prev.trafficState,
+              trafficSpeed: prev.trafficSpeed,
+              name: prev.name,
+            })
+          }
+        } catch (e) {
+          if ((e as Error).name === 'AbortError') throw e
+          // Leave hole rather than inventing a straight chord.
+        }
+      }
+    }
+    out.push(seg)
+  }
+  return out
+}
+
+/** Flatten traffic polylines into one continuous coordinate list (deduped tips). */
+function coordinatesFromTraffic(segments: RouteSegment[]): LatLng[] {
+  const out: LatLng[] = []
+  for (const seg of segments) {
+    appendCoordsSkippingDup(out, seg.coordinates)
+  }
+  return out
+}
+
+/**
+ * Merge sequential driving API results into one RouteResult.
+ * If adjacent chunk endpoints still leave a gap, fill along the road via
+ * fetchRoute([end, start]) with the same provider (no map straight-chord).
+ */
+export async function stitchDrivingResults(
   parts: RouteResult[],
-): RouteResult {
+  provider: RoutingProvider,
+  signal?: AbortSignal,
+): Promise<RouteResult> {
   if (!parts.length) {
     throw new Error('이어 붙일 경로가 없습니다.')
   }
-  if (parts.length === 1) return parts[0]
+  if (parts.length === 1) {
+    const only = parts[0]!
+    let traffic = only.trafficSegments ?? []
+    if (traffic.length > 1) {
+      traffic = await densifyTrafficSegments(traffic, provider, signal)
+    }
+    const coords =
+      traffic.length > 1
+        ? coordinatesFromTraffic(traffic)
+        : dedupeCoords(only.coordinates ?? [])
+    return {
+      ...only,
+      coordinates: coords.length >= 2 ? coords : dedupeCoords(only.coordinates ?? []),
+      trafficSegments: traffic.length ? traffic : only.trafficSegments,
+    }
+  }
 
   const coordinates: LatLng[] = []
   const trafficSegments: RouteSegment[] = []
   const steps: RouteStep[] = []
   let distanceMeters = 0
   let durationSeconds = 0
-  let source = parts[0].source
+  let source = parts[0]!.source
 
   for (let i = 0; i < parts.length; i++) {
-    const part = parts[i]
+    const part = parts[i]!
     distanceMeters += part.distanceMeters
     durationSeconds += part.durationSeconds
     if (part.source && part.source !== source) {
@@ -180,12 +283,48 @@ export function stitchDrivingResults(
     }
 
     const coords = part.coordinates ?? []
+
+    if (i > 0 && coords.length && coordinates.length) {
+      const prevTip = coordinates[coordinates.length - 1]!
+      const nextStart = coords[0]!
+      const gap = haversineMeters(prevTip, nextStart)
+      if (gap > CHUNK_JOIN_GAP_M) {
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+        try {
+          const fill = await fetchRoute(
+            [prevTip, nextStart],
+            'driving',
+            signal,
+            provider,
+          )
+          const fillCoords = fill.coordinates ?? []
+          if (fillCoords.length >= 2) {
+            appendCoordsSkippingDup(coordinates, fillCoords)
+            distanceMeters += fill.distanceMeters
+            durationSeconds += fill.durationSeconds
+          }
+          if (fill.trafficSegments?.length) {
+            trafficSegments.push(...fill.trafficSegments)
+          } else if (fillCoords.length > 1) {
+            const prevTraffic = trafficSegments[trafficSegments.length - 1]
+            trafficSegments.push({
+              coordinates: fillCoords,
+              trafficState: prevTraffic?.trafficState ?? 0,
+              trafficSpeed: prevTraffic?.trafficSpeed,
+              name: prevTraffic?.name,
+            })
+          }
+        } catch (e) {
+          if ((e as Error).name === 'AbortError') throw e
+          // Leave hole rather than inventing a straight chord on the map.
+        }
+      }
+    }
+
     if (i === 0) {
-      coordinates.push(...coords)
+      appendCoordsSkippingDup(coordinates, coords)
     } else if (coords.length) {
-      // Skip first point if it duplicates the previous tip
-      const start = coordinates.length ? 1 : 0
-      coordinates.push(...coords.slice(start))
+      appendCoordsSkippingDup(coordinates, coords)
     }
 
     if (part.trafficSegments?.length) {
@@ -195,9 +334,16 @@ export function stitchDrivingResults(
     const partSteps = part.steps ?? []
     if (i === 0) {
       // Drop only trailing arrive/destination from middle joins later
-      steps.push(...partSteps.filter((s, idx) => !(idx === partSteps.length - 1 && isEndpointStep(s))))
+      steps.push(
+        ...partSteps.filter(
+          (s, idx) =>
+            !(idx === partSteps.length - 1 && isEndpointStep(s)),
+        ),
+      )
     } else if (i === parts.length - 1) {
-      steps.push(...partSteps.filter((s, idx) => !(idx === 0 && isEndpointStep(s))))
+      steps.push(
+        ...partSteps.filter((s, idx) => !(idx === 0 && isEndpointStep(s))),
+      )
     } else {
       steps.push(
         ...partSteps.filter(
@@ -209,12 +355,28 @@ export function stitchDrivingResults(
     }
   }
 
+  let densifiedTraffic = trafficSegments
+  if (trafficSegments.length > 1) {
+    densifiedTraffic = await densifyTrafficSegments(
+      trafficSegments,
+      provider,
+      signal,
+    )
+  }
+
+  // Prefer continuous path rebuilt from densified traffic when available.
+  let finalCoords = dedupeCoords(coordinates)
+  if (densifiedTraffic.length > 1) {
+    const fromTraffic = coordinatesFromTraffic(densifiedTraffic)
+    if (fromTraffic.length >= 2) finalCoords = fromTraffic
+  }
+
   return {
-    coordinates: dedupeCoords(coordinates),
+    coordinates: finalCoords,
     distanceMeters,
     durationSeconds,
     steps,
-    trafficSegments: trafficSegments.length ? trafficSegments : undefined,
+    trafficSegments: densifiedTraffic.length ? densifiedTraffic : undefined,
     source,
     fromOfficialGeometry: false,
   }
@@ -257,7 +419,7 @@ export async function rebuildOfficialAsDriving(
 
   if (!parts.length) return null
 
-  const stitched = stitchDrivingResults(parts)
+  const stitched = await stitchDrivingResults(parts, provider, signal)
   // Geometry-only official gaps (no second Kakao pass) so GapList still works.
   const { gaps: rawGaps, connectorLineStrings } = listOfficialSegmentGaps(ordered)
   const gaps = rawGaps.map((g) => ({

@@ -1,4 +1,5 @@
 import { KakaoKeyMissingError } from './kakao'
+import { looksLikeFerryName } from './ferryHints'
 import type { LatLng, RouteResult, RouteSegment, RouteStep } from '../types'
 
 /** Kakao Directions API allows at most 5 waypoints between origin and destination. */
@@ -80,13 +81,16 @@ function parseRoadsToSegments(sections: KakaoSection[]): RouteSegment[] {
   const segments: RouteSegment[] = []
   for (const section of sections) {
     for (const road of section.roads ?? []) {
+      const name = road.name?.trim() || undefined
+      // Omit ferry / open-water sailing legs from drawable traffic + stitch path.
+      if (looksLikeFerryName(name)) continue
       const coordinates = vertexesToLatLng(road.vertexes)
       if (coordinates.length < 2) continue
       segments.push({
         coordinates,
         trafficState: road.traffic_state ?? 0,
         trafficSpeed: road.traffic_speed,
-        name: road.name?.trim() || undefined,
+        name,
       })
     }
   }

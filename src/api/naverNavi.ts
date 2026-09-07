@@ -1,4 +1,5 @@
 import type { LatLng, RouteResult, RouteSegment, RouteStep } from '../types'
+import { looksLikeFerryName } from './ferryHints'
 
 /** Naver Directions 5 allows at most 5 waypoints between origin and destination. */
 export const NAVER_MAX_WAYPOINTS = 5
@@ -100,6 +101,9 @@ function parseSectionsToTraffic(
   if (!sections?.length || path.length < 2) return undefined
   const segments: RouteSegment[] = []
   for (const sec of sections) {
+    const name = sec.name?.trim() || undefined
+    // Omit ferry / open-water sailing legs from drawable traffic.
+    if (looksLikeFerryName(name)) continue
     const start = sec.pointIndex ?? 0
     const count = sec.pointCount ?? 0
     if (count < 1) continue
@@ -110,10 +114,23 @@ function parseSectionsToTraffic(
       coordinates,
       trafficState: congestionToTrafficState(sec.congestion),
       trafficSpeed: sec.speed,
-      name: sec.name?.trim() || undefined,
+      name,
     })
   }
   return segments.length ? segments : undefined
+}
+
+/** Flatten traffic segments into a coordinate list (dedup consecutive tips). */
+function coordinatesFromTraffic(segments: RouteSegment[]): LatLng[] {
+  const out: LatLng[] = []
+  for (const seg of segments) {
+    for (const c of seg.coordinates) {
+      const prev = out[out.length - 1]
+      if (prev && prev.lat === c.lat && prev.lng === c.lng) continue
+      out.push(c)
+    }
+  }
+  return out
 }
 
 function parseGuidesToSteps(
@@ -230,7 +247,21 @@ export async function fetchNaverDrivingRoute(
   }
 
   const route = routeBag[optionKey]![0]
-  const coordinates = parsePath(route.path)
+  const rawPath = parsePath(route.path)
+  if (rawPath.length < 2) {
+    throw new Error('네이버 경로 좌표가 비어 있습니다.')
+  }
+
+  const omittedFerry = (route.section ?? []).some((sec) =>
+    looksLikeFerryName(sec.name?.trim()),
+  )
+  const trafficSegments = parseSectionsToTraffic(rawPath, route.section)
+  // When ferry sections were dropped, restitch coordinates from remaining
+  // traffic so open-water legs leave empty gaps instead of chords.
+  const coordinates =
+    omittedFerry && trafficSegments && trafficSegments.length > 0
+      ? coordinatesFromTraffic(trafficSegments)
+      : rawPath
   if (coordinates.length < 2) {
     throw new Error('네이버 경로 좌표가 비어 있습니다.')
   }
@@ -243,8 +274,8 @@ export async function fetchNaverDrivingRoute(
     coordinates,
     distanceMeters,
     durationSeconds,
-    steps: parseGuidesToSteps(coordinates, route.guide),
-    trafficSegments: parseSectionsToTraffic(coordinates, route.section),
+    steps: parseGuidesToSteps(rawPath, route.guide),
+    trafficSegments,
     source: 'naver',
   }
 }

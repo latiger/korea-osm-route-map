@@ -17,11 +17,47 @@ export const DEFAULT_ZOOM = 12
 
 const ROUTE_STYLE = { color: '#2563eb', weight: 5, opacity: 0.85 }
 const TRAFFIC_WEIGHT = 6
+/** Bridge consecutive traffic segments when endpoints are farther than this. */
+const TRAFFIC_GAP_BRIDGE_M = 30
 
 function latLngDist2(a: LatLng, b: LatLng): number {
   const dLat = a.lat - b.lat
   const dLng = a.lng - b.lng
   return dLat * dLat + dLng * dLng
+}
+
+function haversineMeters(a: LatLng, b: LatLng): number {
+  const R = 6371000
+  const toRad = (d: number) => (d * Math.PI) / 180
+  const dLat = toRad(b.lat - a.lat)
+  const dLng = toRad(b.lng - a.lng)
+  const lat1 = toRad(a.lat)
+  const lat2 = toRad(b.lat)
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+type TrafficGapBridge = { from: LatLng; to: LatLng; color: string }
+
+/** Straight bridges for stitch holes between consecutive traffic segments. */
+function buildTrafficGapBridges(traffic: RouteSegment[]): TrafficGapBridge[] {
+  const bridges: TrafficGapBridge[] = []
+  for (let i = 0; i < traffic.length - 1; i++) {
+    const segA = traffic[i]!
+    const segB = traffic[i + 1]!
+    const aEnd = segA.coordinates[segA.coordinates.length - 1]
+    const bStart = segB.coordinates[0]
+    if (!aEnd || !bStart) continue
+    if (haversineMeters(aEnd, bStart) <= TRAFFIC_GAP_BRIDGE_M) continue
+    bridges.push({
+      from: aEnd,
+      to: bStart,
+      color: trafficStateColor(segA.trafficState),
+    })
+  }
+  return bridges
 }
 
 /** Match connector color to nearby traffic segment, else main route blue. */
@@ -363,10 +399,19 @@ export function MapCanvas({
   const useMulti = multi.length > 0
   const connectors =
     connectorLineStrings?.filter((line) => line.length > 1) ?? []
+  /** Continuous route underlay when traffic leaves stitch holes. */
+  const showRouteUnderlay = useTraffic && route.length > 1
+  const routeUnderlayColor = showRouteUnderlay
+    ? connectorColor(route, traffic)
+    : ROUTE_STYLE.color
+  /** Fill gaps between consecutive traffic pieces (works even if route is empty). */
+  const gapBridges = useTraffic ? buildTrafficGapBridges(traffic) : []
   const fitRoute = [
     ...(useTraffic ? traffic.flatMap((s) => s.coordinates) : []),
     ...(useMulti ? multi.flat() : []),
     ...connectors.flat(),
+    ...(showRouteUnderlay ? route : []),
+    ...gapBridges.flatMap((b) => [b.from, b.to]),
     ...(!useTraffic && !useMulti ? route : []),
   ]
 
@@ -426,6 +471,19 @@ export function MapCanvas({
           }}
         />
       )}
+      {showRouteUnderlay && (
+        <Polyline
+          key="route-underlay"
+          positions={route.map((p) => [p.lat, p.lng] as [number, number])}
+          pathOptions={{
+            color: routeUnderlayColor,
+            weight: TRAFFIC_WEIGHT,
+            opacity: 0.75,
+            lineCap: 'round',
+            lineJoin: 'round',
+          }}
+        />
+      )}
       {useMulti &&
         multi.map((line, i) => (
           <Polyline
@@ -439,6 +497,22 @@ export function MapCanvas({
           key={`connector-line-${i}`}
           positions={line.map((p) => [p.lat, p.lng] as [number, number])}
           pathOptions={connectorPathOptions(line, traffic)}
+        />
+      ))}
+      {gapBridges.map((b, i) => (
+        <Polyline
+          key={`traffic-gap-bridge-${i}`}
+          positions={[
+            [b.from.lat, b.from.lng] as [number, number],
+            [b.to.lat, b.to.lng] as [number, number],
+          ]}
+          pathOptions={{
+            color: b.color,
+            weight: TRAFFIC_WEIGHT,
+            opacity: 0.9,
+            lineCap: 'round',
+            lineJoin: 'round',
+          }}
         />
       ))}
       {useTraffic &&

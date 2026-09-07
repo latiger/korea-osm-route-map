@@ -198,8 +198,14 @@ export function RoadNamePanel({
 
   useEffect(() => {
     onBusyChange?.(routingBusy)
-    return () => onBusyChange?.(false)
   }, [routingBusy, onBusyChange])
+
+  // Clear busy only on unmount — cleanup on every routingBusy change
+  // incorrectly clears the map loading bar (Strict Mode / dep churn).
+  useEffect(() => {
+    return () => onBusyChange?.(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (!chain.length) {

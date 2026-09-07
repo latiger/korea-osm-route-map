@@ -87,8 +87,14 @@ export function OriginDestPanel({
 
   useEffect(() => {
     onBusyChange?.(loading)
-    return () => onBusyChange?.(false)
   }, [loading, onBusyChange])
+
+  // Clear busy only on unmount — do not clear on every loading dep change
+  // (Strict Mode / re-runs would briefly hide the map loading bar).
+  useEffect(() => {
+    return () => onBusyChange?.(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const searchOrigin = useDebouncedCallback(async (q: string) => {
     if (!q.trim()) {
@@ -165,7 +171,7 @@ export function OriginDestPanel({
       setRoute(null)
       setError((e as Error).message || '경로 계산 중 오류가 발생했습니다.')
     } finally {
-      setLoading(false)
+      if (!ac.signal.aborted) setLoading(false)
     }
   }
 

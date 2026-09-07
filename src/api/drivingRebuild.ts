@@ -3,6 +3,7 @@ import {
   listOfficialSegmentGaps,
   orderAndOrientSegments,
 } from './nationalRoads'
+import { officialLandUnderlay } from './openWaterFilter'
 import { fetchRoute } from './route'
 import type {
   LatLng,
@@ -436,8 +437,13 @@ export async function rebuildOfficialAsDriving(
 
   // Keep a light road-name prefix on steps for multi-road chains
   const roadName = match.name
+  // Official land centerlines as underlay: after ferry legs are dropped from
+  // Kakao/Naver, island roads still appear from MOLIT geometry (open-water
+  // chords between islands are filtered out).
+  const landUnderlay = officialLandUnderlay(ordered)
   return {
     ...stitched,
+    lineStrings: landUnderlay.length ? landUnderlay : undefined,
     steps: stitched.steps.map((s) => ({
       ...s,
       name: s.name || roadName,

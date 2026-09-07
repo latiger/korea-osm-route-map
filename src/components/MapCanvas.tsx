@@ -10,7 +10,14 @@ import {
 } from 'react-leaflet'
 import L from 'leaflet'
 import { trafficStateColor } from '../api/kakaoNavi'
-import { looksLikeFerryName } from '../api/ferryHints'
+import {
+  dropOpenWaterPieces,
+  distanceToPolylinesMeters,
+  haversineMeters,
+  looksLikeOpenWaterChord,
+  splitPolylineOnJumps,
+  STEP_MARKER_MAX_DIST_M,
+} from '../api/openWaterFilter'
 import type { LatLng, MapFocus, PlaceMode, RouteSegment } from '../types'
 
 export const SEOUL_CENTER: LatLng = { lat: 37.5665, lng: 126.978 }
@@ -22,101 +29,11 @@ const TRAFFIC_WEIGHT = 6
 const TRAFFIC_GAP_BRIDGE_M = 30
 /** Only short stitch holes — never long straight chords across the map. */
 const TRAFFIC_GAP_BRIDGE_MAX_M = 500
-/**
- * Max consecutive-point distance (m) to keep in one drawn polyline piece.
- * Sparse stitch / official holes often jump kilometers — Leaflet would chord those.
- */
-const POLYLINE_MAX_JUMP_M = 600
-/**
- * Drop long near-straight sparse chords (ferry / open-water stitches) after
- * jump-splitting. Real bridges usually have denser vertices; coastal roads wind.
- */
-const OPEN_WATER_MIN_LENGTH_M = 600
-const OPEN_WATER_STRAIGHTNESS_MAX = 1.12
-const OPEN_WATER_AVG_STEP_M = 200
 
 function latLngDist2(a: LatLng, b: LatLng): number {
   const dLat = a.lat - b.lat
   const dLng = a.lng - b.lng
   return dLat * dLat + dLng * dLng
-}
-
-function haversineMeters(a: LatLng, b: LatLng): number {
-  const R = 6371000
-  const toRad = (d: number) => (d * Math.PI) / 180
-  const dLat = toRad(b.lat - a.lat)
-  const dLng = toRad(b.lng - a.lng)
-  const lat1 = toRad(a.lat)
-  const lat2 = toRad(b.lat)
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
-  return 2 * R * Math.asin(Math.sqrt(h))
-}
-
-/**
- * Split a polyline into continuous pieces so Leaflet never draws a straight
- * chord across consecutive points farther than maxJumpM apart.
- */
-export function splitPolylineOnJumps(
-  points: LatLng[],
-  maxJumpM: number = POLYLINE_MAX_JUMP_M,
-): LatLng[][] {
-  if (points.length < 2) return []
-  const pieces: LatLng[][] = []
-  let current: LatLng[] = [points[0]!]
-  for (let i = 1; i < points.length; i++) {
-    const prev = points[i - 1]!
-    const p = points[i]!
-    if (haversineMeters(prev, p) > maxJumpM) {
-      if (current.length > 1) pieces.push(current)
-      current = [p]
-    } else {
-      current.push(p)
-    }
-  }
-  if (current.length > 1) pieces.push(current)
-  return pieces
-}
-
-function pathLengthMeters(points: LatLng[]): number {
-  let sum = 0
-  for (let i = 1; i < points.length; i++) {
-    sum += haversineMeters(points[i - 1]!, points[i]!)
-  }
-  return sum
-}
-
-/**
- * Heuristic for ferry / open-water chords between islands:
- * long, near-straight, sparsely sampled — or an explicit ferry name hint.
- * Sinuous coastal roads (path ≫ chord) and dense bridge polylines stay.
- */
-export function looksLikeOpenWaterChord(
-  points: LatLng[],
-  name?: string | null,
-): boolean {
-  if (looksLikeFerryName(name)) return true
-  if (points.length < 2) return false
-  const pathLen = pathLengthMeters(points)
-  if (pathLen < OPEN_WATER_MIN_LENGTH_M) return false
-  const start = points[0]!
-  const end = points[points.length - 1]!
-  const chord = haversineMeters(start, end)
-  if (chord < OPEN_WATER_MIN_LENGTH_M * 0.85) return false
-  if (chord <= 0) return false
-  const ratio = pathLen / chord
-  if (ratio > OPEN_WATER_STRAIGHTNESS_MAX) return false
-  const avgStep = pathLen / (points.length - 1)
-  if (avgStep < OPEN_WATER_AVG_STEP_M) return false
-  return true
-}
-
-function dropOpenWaterPieces(
-  pieces: LatLng[][],
-  name?: string | null,
-): LatLng[][] {
-  return pieces.filter((piece) => !looksLikeOpenWaterChord(piece, name))
 }
 
 type TrafficGapBridge = { from: LatLng; to: LatLng; color: string }
@@ -522,7 +439,7 @@ export function MapCanvas({
   const multi = routeLineStrings?.filter((line) => line.length > 1) ?? []
   const useMulti = multi.length > 0
   /** Routed connectors only — never paint 2-point official straight chords. */
-  const connectors = drawableConnectors(connectorLineStrings)
+  const connectorsRaw = drawableConnectors(connectorLineStrings)
   /** Route underlay / single-polyline fallback, split so sparse stitches do not chord. */
   const routePieces = dropOpenWaterPieces(splitPolylineOnJumps(route))
   const multiPieces = useMulti
@@ -536,8 +453,19 @@ export function MapCanvas({
   const routeUnderlayColor = useTraffic
     ? connectorColor(route, traffic)
     : ROUTE_STYLE.color
-  /** Fill short stitch holes between consecutive traffic pieces. */
-  const gapBridges = useTraffic ? buildTrafficGapBridges(traffic) : []
+  const multiPathOptions: L.PathOptions = useTraffic
+    ? {
+        color: routeUnderlayColor,
+        weight: TRAFFIC_WEIGHT,
+        opacity: 0.75,
+        lineCap: 'round',
+        lineJoin: 'round',
+      }
+    : ROUTE_STYLE
+  /** Fill short stitch holes between consecutive traffic pieces; drop sea chords. */
+  const gapBridges = (useTraffic ? buildTrafficGapBridges(traffic) : []).filter(
+    (b) => !looksLikeOpenWaterChord([b.from, b.to]),
+  )
   /** Traffic draw pieces: jump-split then drop open-water chords. */
   const trafficPieces = useTraffic
     ? traffic.flatMap((seg, i) =>
@@ -550,10 +478,36 @@ export function MapCanvas({
         ),
       )
     : []
+  /** Connector pieces after jump-split + open-water drop (no long sea strokes). */
+  const connectorPieces = connectorsRaw.flatMap((line, i) =>
+    dropOpenWaterPieces(splitPolylineOnJumps(line)).map((piece, j) => ({
+      key: `connector-line-${i}-${j}`,
+      piece,
+      sourceLine: line,
+    })),
+  )
+  const drawableForSteps: LatLng[][] = [
+    ...trafficPieces.map((s) => s.piece),
+    ...multiPieces.map((m) => m.piece),
+    ...routePieces,
+    ...connectorPieces.map((c) => c.piece),
+    ...gapBridges.map((b) => [b.from, b.to]),
+  ]
+  /** Hide orphan step badges over empty sea / islands with no drawable path. */
+  const visibleStepMarkers =
+    drawableForSteps.length === 0
+      ? stepMarkers
+      : stepMarkers.filter(
+          (s) =>
+            distanceToPolylinesMeters(
+              { lat: s.lat, lng: s.lng },
+              drawableForSteps,
+            ) <= STEP_MARKER_MAX_DIST_M,
+        )
   const fitRoute = [
     ...trafficPieces.flatMap((s) => s.piece),
     ...multiPieces.flatMap((m) => m.piece),
-    ...connectors.flat(),
+    ...connectorPieces.flatMap((c) => c.piece),
     ...routePieces.flat(),
     ...gapBridges.flatMap((b) => [b.from, b.to]),
   ]
@@ -592,12 +546,12 @@ export function MapCanvas({
           zIndexOffset={600}
         />
       ))}
-      {stepMarkers.map((s) => (
+      {visibleStepMarkers.map((s) => (
         <Marker
           key={`step-${s.n}-${s.lat}-${s.lng}`}
           position={[s.lat, s.lng]}
           title={s.label ? `${s.n}. ${s.label}` : String(s.n)}
-          icon={stepBadgeIcon(s.n, stepMarkers.length > 40)}
+          icon={stepBadgeIcon(s.n, visibleStepMarkers.length > 40)}
           zIndexOffset={500}
           interactive={false}
         />
@@ -632,18 +586,16 @@ export function MapCanvas({
         <Polyline
           key={key}
           positions={piece.map((p) => [p.lat, p.lng] as [number, number])}
-          pathOptions={ROUTE_STYLE}
+          pathOptions={multiPathOptions}
         />
       ))}
-      {connectors.flatMap((line, i) =>
-        splitPolylineOnJumps(line).map((piece, j) => (
-          <Polyline
-            key={`connector-line-${i}-${j}`}
-            positions={piece.map((p) => [p.lat, p.lng] as [number, number])}
-            pathOptions={connectorPathOptions(line, traffic)}
-          />
-        )),
-      )}
+      {connectorPieces.map(({ key, piece, sourceLine }) => (
+        <Polyline
+          key={key}
+          positions={piece.map((p) => [p.lat, p.lng] as [number, number])}
+          pathOptions={connectorPathOptions(sourceLine, traffic)}
+        />
+      ))}
       {gapBridges.map((b, i) => (
         <Polyline
           key={`traffic-gap-bridge-${i}`}

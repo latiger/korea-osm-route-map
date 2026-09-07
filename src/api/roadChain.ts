@@ -113,6 +113,7 @@ async function materializeRoad(
             route: rebuilt,
             start,
             end,
+            // Prefer official land underlay from rebuild; fall back to traffic/coords.
             lineStrings: lineStringsFromRoute(rebuilt),
             connectorLineStrings: rebuilt.connectorLineStrings,
             official: false,
@@ -400,9 +401,15 @@ export async function buildChainedRoute(
     if (road.official) anyOfficial = true
     else anyNonOfficial = true
 
-    // Road parts as lineStrings (blue); intra-road gap bridges as dashed connectors.
+    // Road parts as lineStrings (official land underlay / blue); traffic on top.
     allLineStrings.push(...road.lineStrings)
     for (const line of road.lineStrings) allCoords.push(...line)
+    if (road.route.trafficSegments?.length) {
+      trafficSegments.push(...road.route.trafficSegments)
+    } else if (road.route.coordinates && road.route.coordinates.length >= 2) {
+      // Prefer densified driving coords for FitBounds / underlay when no traffic.
+      allCoords.push(...road.route.coordinates)
+    }
     const roadConnectors =
       road.connectorLineStrings ?? road.route.connectorLineStrings
     if (roadConnectors?.length) {

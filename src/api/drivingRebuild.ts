@@ -227,7 +227,11 @@ async function densifyTrafficSegments(
   return out
 }
 
-/** Flatten traffic polylines into one continuous coordinate list (deduped tips). */
+/**
+ * Flatten traffic polylines into one coordinate list (deduped tips).
+ * May contain sparse jumps where densify left a hole — MapCanvas splits
+ * those (>POLYLINE_MAX_JUMP_M) instead of drawing straight chords.
+ */
 function coordinatesFromTraffic(segments: RouteSegment[]): LatLng[] {
   const out: LatLng[] = []
   for (const seg of segments) {
@@ -316,11 +320,13 @@ export async function stitchDrivingResults(
           }
         } catch (e) {
           if ((e as Error).name === 'AbortError') throw e
-          // Leave hole rather than inventing a straight chord on the map.
+          // Leave a sparse jump (omit invented chord). MapCanvas will not
+          // draw across jumps > POLYLINE_MAX_JUMP_M.
         }
       }
     }
 
+    // Always keep real path points; never invent midpoints for failed fills.
     if (i === 0) {
       appendCoordsSkippingDup(coordinates, coords)
     } else if (coords.length) {

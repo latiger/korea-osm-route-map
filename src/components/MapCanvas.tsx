@@ -21,6 +21,11 @@ const TRAFFIC_WEIGHT = 6
 const TRAFFIC_GAP_BRIDGE_M = 30
 /** Only short stitch holes — never long straight chords across the map. */
 const TRAFFIC_GAP_BRIDGE_MAX_M = 500
+/**
+ * Max consecutive-point distance (m) to keep in one drawn polyline piece.
+ * Sparse stitch / official holes often jump kilometers — Leaflet would chord those.
+ */
+const POLYLINE_MAX_JUMP_M = 600
 
 function latLngDist2(a: LatLng, b: LatLng): number {
   const dLat = a.lat - b.lat
@@ -39,6 +44,31 @@ function haversineMeters(a: LatLng, b: LatLng): number {
     Math.sin(dLat / 2) ** 2 +
     Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
   return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+/**
+ * Split a polyline into continuous pieces so Leaflet never draws a straight
+ * chord across consecutive points farther than maxJumpM apart.
+ */
+export function splitPolylineOnJumps(
+  points: LatLng[],
+  maxJumpM: number = POLYLINE_MAX_JUMP_M,
+): LatLng[][] {
+  if (points.length < 2) return []
+  const pieces: LatLng[][] = []
+  let current: LatLng[] = [points[0]!]
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1]!
+    const p = points[i]!
+    if (haversineMeters(prev, p) > maxJumpM) {
+      if (current.length > 1) pieces.push(current)
+      current = [p]
+    } else {
+      current.push(p)
+    }
+  }
+  if (current.length > 1) pieces.push(current)
+  return pieces
 }
 
 type TrafficGapBridge = { from: LatLng; to: LatLng; color: string }
@@ -96,7 +126,8 @@ function connectorColor(line: LatLng[], traffic: RouteSegment[]): string {
 
 /**
  * Gap connectors share route/traffic color family.
- * 2-point straight gaps stay dashed; routed (>2 pts) are solid.
+ * Only routed connectors (>2 pts) are drawn on the map; 2-point official
+ * straights stay in GapList for 「이어서 연결」 and are not painted.
  */
 function connectorPathOptions(
   line: LatLng[],
@@ -104,15 +135,19 @@ function connectorPathOptions(
 ): L.PathOptions {
   const color = connectorColor(line, traffic)
   const useTrafficLook = traffic.length > 0
-  const straightGap = line.length <= 2
   return {
     color,
     weight: useTrafficLook ? TRAFFIC_WEIGHT : ROUTE_STYLE.weight,
     opacity: useTrafficLook ? 0.9 : ROUTE_STYLE.opacity,
-    ...(straightGap ? { dashArray: '6 8' } : {}),
     lineCap: 'round',
     lineJoin: 'round',
   }
+}
+
+/** Draw only real routed connectors; omit 2-point official straight chords. */
+function drawableConnectors(lines: LatLng[][] | undefined): LatLng[][] {
+  if (!lines?.length) return []
+  return lines.filter((line) => line.length > 2)
 }
 const FOCUS_ZOOM = 18
 
@@ -353,7 +388,7 @@ export interface MapCanvasProps {
   routeLineStrings?: LatLng[][]
   /**
    * Gap bridges between official MultiLineString parts.
-   * Color matches nearby traffic (or ROUTE_STYLE); 2-point = dashed, >2 = solid.
+   * Only routed (>2 pts) connectors are drawn; 2-point straights stay in GapList.
    */
   connectorLineStrings?: LatLng[][]
   /** Kakao traffic-colored road segments (preferred when present) */
@@ -401,10 +436,18 @@ export function MapCanvas({
   const useTraffic = traffic.length > 0
   const multi = routeLineStrings?.filter((line) => line.length > 1) ?? []
   const useMulti = multi.length > 0
-  const connectors =
-    connectorLineStrings?.filter((line) => line.length > 1) ?? []
-  /** Continuous route underlay whenever we have a full path (traffic or multi may omit stretches). */
-  const showRouteUnderlay = route.length > 1
+  /** Routed connectors only — never paint 2-point official straight chords. */
+  const connectors = drawableConnectors(connectorLineStrings)
+  /** Route underlay / single-polyline fallback, split so sparse stitches do not chord. */
+  const routePieces = splitPolylineOnJumps(route)
+  const multiPieces = useMulti
+    ? multi.flatMap((line, i) =>
+        splitPolylineOnJumps(line).map((piece, j) => ({
+          key: `route-line-${i}-${j}`,
+          piece,
+        })),
+      )
+    : []
   const routeUnderlayColor = useTraffic
     ? connectorColor(route, traffic)
     : ROUTE_STYLE.color
@@ -414,9 +457,8 @@ export function MapCanvas({
     ...(useTraffic ? traffic.flatMap((s) => s.coordinates) : []),
     ...(useMulti ? multi.flat() : []),
     ...connectors.flat(),
-    ...(showRouteUnderlay ? route : []),
+    ...routePieces.flat(),
     ...gapBridges.flatMap((b) => [b.from, b.to]),
-    ...(!useTraffic && !useMulti && !showRouteUnderlay ? route : []),
   ]
 
   return (
@@ -475,10 +517,10 @@ export function MapCanvas({
           }}
         />
       )}
-      {showRouteUnderlay && (
+      {routePieces.map((piece, i) => (
         <Polyline
-          key="route-underlay"
-          positions={route.map((p) => [p.lat, p.lng] as [number, number])}
+          key={`route-underlay-${i}`}
+          positions={piece.map((p) => [p.lat, p.lng] as [number, number])}
           pathOptions={{
             color: routeUnderlayColor,
             weight: useTraffic ? TRAFFIC_WEIGHT : ROUTE_STYLE.weight,
@@ -487,22 +529,23 @@ export function MapCanvas({
             lineJoin: 'round',
           }}
         />
-      )}
-      {useMulti &&
-        multi.map((line, i) => (
-          <Polyline
-            key={`route-line-${i}`}
-            positions={line.map((p) => [p.lat, p.lng] as [number, number])}
-            pathOptions={ROUTE_STYLE}
-          />
-        ))}
-      {connectors.map((line, i) => (
+      ))}
+      {multiPieces.map(({ key, piece }) => (
         <Polyline
-          key={`connector-line-${i}`}
-          positions={line.map((p) => [p.lat, p.lng] as [number, number])}
-          pathOptions={connectorPathOptions(line, traffic)}
+          key={key}
+          positions={piece.map((p) => [p.lat, p.lng] as [number, number])}
+          pathOptions={ROUTE_STYLE}
         />
       ))}
+      {connectors.flatMap((line, i) =>
+        splitPolylineOnJumps(line).map((piece, j) => (
+          <Polyline
+            key={`connector-line-${i}-${j}`}
+            positions={piece.map((p) => [p.lat, p.lng] as [number, number])}
+            pathOptions={connectorPathOptions(line, traffic)}
+          />
+        )),
+      )}
       {gapBridges.map((b, i) => (
         <Polyline
           key={`traffic-gap-bridge-${i}`}

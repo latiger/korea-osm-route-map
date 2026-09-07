@@ -409,7 +409,8 @@ function makeGapInfo(
 
 /**
  * Geometry-only gap listing between ordered official segments.
- * No routing API calls — mid-size gaps are `straight` (dashed connectors);
+ * No routing API calls — mid-size gaps are `straight` (2-point connectors
+ * kept for GapList 「이어서 연결」, not drawn as map chords);
  * long gaps (> GAP_ROUTE_MAX_M) are `skipped`. Used after driving rebuild
  * so GapList can show official discontinuities without a second Kakao pass.
  */

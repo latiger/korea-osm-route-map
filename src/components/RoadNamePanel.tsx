@@ -114,10 +114,34 @@ function isConnectorOdEndpointText(text: string | undefined): boolean {
   return false
 }
 
+/** Prefer a real road/turn name from filtered connector maneuvers. */
+function pickConnectorSummaryText(
+  maneuvers: RouteStep[],
+  gap: RouteGapInfo,
+): { name: string; label: string } {
+  for (const s of maneuvers) {
+    const name = (s.name ?? '').trim()
+    if (!name || isConnectorOdEndpointText(name)) continue
+    const label = (s.label ?? '').trim()
+    if (label && !isConnectorOdEndpointText(label) && label !== name) {
+      return { name, label }
+    }
+    return { name, label: name }
+  }
+  for (const s of maneuvers) {
+    const label = (s.label ?? '').trim()
+    if (!label || isConnectorOdEndpointText(label)) continue
+    return { name: label, label }
+  }
+  const gapLabel = (gap.label ?? '').trim()
+  if (gapLabel) return { name: gapLabel, label: gapLabel }
+  return { name: '', label: '' }
+}
+
 /**
- * Insert connector turn-by-turn maneuvers at the gap's place in the path
- * (not blindly appended at the end). No section header — list shows only
- * the connector's navigation steps (OD endpoints / 출발지·목적지 dropped).
+ * Insert one summary connector step at the gap (not the full Kakao/OSRM
+ * maneuver list — those would renumber badges into the 40s). OD endpoint
+ * types/labels are filtered when picking guidance text.
  */
 function appendConnectorSteps(
   baseSteps: RouteStep[],
@@ -130,11 +154,24 @@ function appendConnectorSteps(
       return false
     return true
   })
-  if (!maneuvers.length) return baseSteps
+  const { name, label } = pickConnectorSummaryText(maneuvers, gap)
+  const location =
+    gap.from ??
+    maneuvers.find((s) => s.location)?.location ??
+    (conn.steps ?? []).find((s) => s.location)?.location ??
+    conn.coordinates?.[0]
+  const summary: RouteStep = {
+    type: 'connect',
+    name,
+    label,
+    distanceMeters: conn.distanceMeters,
+    durationSeconds: conn.durationSeconds,
+    location,
+  }
   const insertAt = insertIndexForGap(baseSteps, gap)
   return [
     ...baseSteps.slice(0, insertAt),
-    ...maneuvers,
+    summary,
     ...baseSteps.slice(insertAt),
   ]
 }

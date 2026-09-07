@@ -184,6 +184,158 @@ export function orderAndOrientSegments(
   return ordered
 }
 
+const MAX_DECLARED_END_SNAP_M = 10_000
+
+function nearestPathIndex(
+  path: LatLng[],
+  target: LatLng,
+): { index: number; dist: number } {
+  let bestIdx = 0
+  let bestDist = Infinity
+  for (let i = 0; i < path.length; i++) {
+    const d = haversineMeters(path[i], target)
+    if (d < bestDist) {
+      bestDist = d
+      bestIdx = i
+    }
+  }
+  return { index: bestIdx, dist: bestDist }
+}
+
+/**
+ * Keep the subpath between points nearest to declared `start` / `end`.
+ * If end appears before start on the path, reverse.
+ * When a declared tip is absurdly far from the path (> maxSnapM), fall back:
+ * snap only the closer end, or keep the full path if neither is near.
+ */
+export function clipPathToDeclaredEnds(
+  path: LatLng[],
+  start: LatLng,
+  end: LatLng,
+  maxSnapM = MAX_DECLARED_END_SNAP_M,
+): LatLng[] {
+  if (path.length < 2) return path
+  if (
+    !Number.isFinite(start?.lat) ||
+    !Number.isFinite(start?.lng) ||
+    !Number.isFinite(end?.lat) ||
+    !Number.isFinite(end?.lng)
+  ) {
+    return path
+  }
+
+  const nearStart = nearestPathIndex(path, start)
+  const nearEnd = nearestPathIndex(path, end)
+  const startOk = nearStart.dist <= maxSnapM
+  const endOk = nearEnd.dist <= maxSnapM
+
+  if (!startOk && !endOk) return path
+
+  let i0 = 0
+  let i1 = path.length - 1
+  if (startOk) i0 = nearStart.index
+  if (endOk) i1 = nearEnd.index
+
+  if (i0 === i1) return path
+
+  if (i1 < i0) {
+    return path.slice(i1, i0 + 1).reverse()
+  }
+  return path.slice(i0, i1 + 1)
+}
+
+function flattenLinesLocal(lines: LatLng[][]): {
+  flat: LatLng[]
+  owners: { seg: number; pt: number }[]
+} {
+  const flat: LatLng[] = []
+  const owners: { seg: number; pt: number }[] = []
+  for (let s = 0; s < lines.length; s++) {
+    const line = lines[s]
+    for (let p = 0; p < line.length; p++) {
+      const pt = line[p]
+      const prev = flat[flat.length - 1]
+      if (prev && prev.lat === pt.lat && prev.lng === pt.lng) continue
+      flat.push(pt)
+      owners.push({ seg: s, pt: p })
+    }
+  }
+  return { flat, owners }
+}
+
+/**
+ * Clip greedily-ordered MultiLineString parts to the declared start/end
+ * traversal, preserving segment boundaries for gap bridging.
+ */
+export function clipOrderedSegmentsToDeclaredEnds(
+  ordered: LatLng[][],
+  start: LatLng,
+  end: LatLng,
+  maxSnapM = MAX_DECLARED_END_SNAP_M,
+): LatLng[][] {
+  if (ordered.length === 0) return ordered
+  const { flat, owners } = flattenLinesLocal(ordered)
+  if (flat.length < 2) return ordered
+
+  const nearStart = nearestPathIndex(flat, start)
+  const nearEnd = nearestPathIndex(flat, end)
+  const startOk =
+    Number.isFinite(start?.lat) &&
+    Number.isFinite(start?.lng) &&
+    nearStart.dist <= maxSnapM
+  const endOk =
+    Number.isFinite(end?.lat) &&
+    Number.isFinite(end?.lng) &&
+    nearEnd.dist <= maxSnapM
+
+  if (!startOk && !endOk) return ordered
+
+  let i0 = 0
+  let i1 = flat.length - 1
+  if (startOk) i0 = nearStart.index
+  if (endOk) i1 = nearEnd.index
+  if (i0 === i1) return ordered
+
+  let lo = i0
+  let hi = i1
+  let reverse = false
+  if (hi < lo) {
+    lo = i1
+    hi = i0
+    reverse = true
+  }
+
+  // Rebuild contiguous segment slices covering flat[lo..hi]
+  const out: LatLng[][] = []
+  let curSeg = -1
+  let buf: LatLng[] = []
+  for (let i = lo; i <= hi; i++) {
+    const { seg, pt } = owners[i]
+    if (seg !== curSeg) {
+      if (buf.length >= 2) out.push(buf)
+      curSeg = seg
+      buf = [ordered[seg][pt]]
+    } else {
+      buf.push(ordered[seg][pt])
+    }
+  }
+  if (buf.length >= 2) out.push(buf)
+  else if (buf.length === 1 && out.length) {
+    out[out.length - 1].push(buf[0])
+  }
+
+  if (out.length === 0) {
+    const clipped = flat.slice(lo, hi + 1)
+    return clipped.length >= 2 ? [reverse ? clipped.slice().reverse() : clipped] : ordered
+  }
+
+  if (reverse) {
+    return out.map((l) => l.slice().reverse()).reverse()
+  }
+  return out
+}
+
+
 interface GapCandidate {
   index: number
   a: LatLng
@@ -648,7 +800,11 @@ export async function routeFromOfficialGeometry(
 
   if (!raw.length) return null
 
-  const ordered = orderAndOrientSegments(raw, match.start)
+  const ordered = clipOrderedSegmentsToDeclaredEnds(
+    orderAndOrientSegments(raw, match.start),
+    match.start,
+    match.end,
+  )
   const { lineStrings, connectorLineStrings, connectorMeters, gaps: rawGaps } =
     await bridgeSegmentGaps(ordered, signal, provider)
 

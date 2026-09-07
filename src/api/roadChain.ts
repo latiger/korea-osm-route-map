@@ -100,11 +100,19 @@ async function materializeRoad(
         const rebuilt = await rebuildOfficialAsDriving(match, provider, signal)
         if (rebuilt && (rebuilt.coordinates?.length ?? 0) >= 2) {
           const coords = rebuilt.coordinates!
+          const start =
+            Number.isFinite(match.start?.lat) && Number.isFinite(match.start?.lng)
+              ? match.start
+              : coords[0]
+          const end =
+            Number.isFinite(match.end?.lat) && Number.isFinite(match.end?.lng)
+              ? match.end
+              : coords[coords.length - 1]
           return {
             match,
             route: rebuilt,
-            start: coords[0],
-            end: coords[coords.length - 1],
+            start,
+            end,
             lineStrings: lineStringsFromRoute(rebuilt),
             official: false,
           }

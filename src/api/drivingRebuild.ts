@@ -1,4 +1,4 @@
-import { orderAndOrientSegments } from './nationalRoads'
+import { clipPathToDeclaredEnds, orderAndOrientSegments } from './nationalRoads'
 import { fetchRoute } from './route'
 import type {
   LatLng,
@@ -231,7 +231,11 @@ export async function rebuildOfficialAsDriving(
   if (!raw.length) return null
 
   const ordered = orderAndOrientSegments(raw, match.start)
-  const flat = flattenOrderedLines(ordered)
+  const flat = clipPathToDeclaredEnds(
+    flattenOrderedLines(ordered),
+    match.start,
+    match.end,
+  )
   if (flat.length < 2) return null
 
   const samples = sampleAlongPath(flat)

@@ -22,6 +22,7 @@ import type {
   RouteStep,
   TravelProfile,
 } from '../types'
+import { reorderRouteSteps } from '../api/orderStepsAlongRoute'
 import { GapList } from './GapList'
 import { ProfileToggle } from './ProfileToggle'
 import { RouteSummary } from './RouteSummary'
@@ -410,7 +411,7 @@ export function RoadNamePanel({
           ? [...(route.trafficSegments ?? []), ...conn.trafficSegments]
           : route.trafficSegments
 
-      const nextRoute: RouteResult = {
+      const nextRoute = reorderRouteSteps({
         ...route,
         connectorLineStrings: nextConnectors,
         trafficSegments: mergedTraffic,
@@ -418,7 +419,7 @@ export function RoadNamePanel({
         durationSeconds,
         gaps,
         steps,
-      }
+      })
       applyConnectedRoute(nextRoute)
     } catch (e) {
       if ((e as Error).name === 'AbortError') return
@@ -503,7 +504,7 @@ export function RoadNamePanel({
               ? [...(current.trafficSegments ?? []), ...conn.trafficSegments]
               : current.trafficSegments
 
-          current = {
+          current = reorderRouteSteps({
             ...current,
             connectorLineStrings: nextConnectors,
             trafficSegments: mergedTraffic,
@@ -511,7 +512,7 @@ export function RoadNamePanel({
             durationSeconds,
             gaps,
             steps,
-          }
+          })
           applyConnectedRoute(current)
         } catch (e) {
           if ((e as Error).name === 'AbortError') return

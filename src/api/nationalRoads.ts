@@ -8,6 +8,10 @@ import type {
 } from '../types'
 import { parseRoadQuery } from './overpass'
 import { fetchRoute } from './route'
+import {
+  orderStepsAlongRoute,
+  pathPointsFromRoute,
+} from './orderStepsAlongRoute'
 
 export interface NationalRoadIndexEntry {
   routeNo: string
@@ -605,18 +609,13 @@ export async function routeFromOfficialGeometry(
   const distanceMeters = officialMeters + connectorMeters
   const durationSeconds = (distanceMeters / 1000 / 60) * 3600
 
-  const steps = [
-    ...buildOfficialSteps(lineStrings, match.name, match.agencies),
-    ...buildConnectorSteps(connectorLineStrings),
-  ]
-
   const gaps: RouteGapInfo[] = rawGaps.map((g) => ({
     ...g,
     id: `${match.id}-${g.id}`,
     label: `${match.name} 내부`,
   }))
 
-  return {
+  const draft: RouteResult = {
     coordinates: longestLine(lineStrings),
     lineStrings,
     connectorLineStrings: connectorLineStrings.length
@@ -624,10 +623,18 @@ export async function routeFromOfficialGeometry(
       : undefined,
     distanceMeters,
     durationSeconds,
-    steps,
+    steps: [
+      ...buildOfficialSteps(lineStrings, match.name, match.agencies),
+      ...buildConnectorSteps(connectorLineStrings),
+    ],
     fromOfficialGeometry: true,
     source: 'official',
     gaps: gaps.length ? gaps : undefined,
+  }
+
+  return {
+    ...draft,
+    steps: orderStepsAlongRoute(draft.steps, pathPointsFromRoute(draft)),
   }
 }
 

@@ -49,6 +49,9 @@ export function RouteSummary({ route, onStepClick }: Props) {
         {route.source === 'kakao' && (
           <span className="hint muted">교통 반영 (카카오내비)</span>
         )}
+        {route.source === 'naver' && (
+          <span className="hint muted">교통 반영 (네이버 길찾기)</span>
+        )}
         {list.length > 0 && (
           <button
             type="button"

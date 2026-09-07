@@ -1,6 +1,8 @@
 export type TravelProfile = 'driving' | 'walking'
 export type AppMode = 'od' | 'road'
 export type PlaceMode = 'origin' | 'dest' | 'via'
+/** Driving route API preference (walking always uses OSRM). */
+export type RoutingProvider = 'kakao' | 'naver' | 'auto'
 
 export interface LatLng {
   lat: number
@@ -77,7 +79,9 @@ export interface RouteResult {
   /** Kakao Navi per-road segments colored by traffic_state */
   trafficSegments?: RouteSegment[]
   /** Routing / geometry provenance */
-  source?: 'kakao' | 'osrm' | 'official'
+  source?: 'kakao' | 'naver' | 'osrm' | 'official'
+  /** Short Korean note when a preferred provider failed and we fell back */
+  fallbackNote?: string
   /** Discontinuous gaps within / between roads (official geometry) */
   gaps?: RouteGapInfo[]
 }

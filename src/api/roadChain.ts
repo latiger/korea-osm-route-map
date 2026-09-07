@@ -1,4 +1,5 @@
 import { routeFromOfficialGeometry } from './nationalRoads'
+import { rebuildOfficialAsDriving } from './drivingRebuild'
 import { fetchRoute } from './route'
 import { assessConnectorQuality } from './connectorQuality'
 import type {
@@ -9,6 +10,7 @@ import type {
   RouteResult,
   RouteStep,
   RouteSegment,
+  RoutingProvider,
   TravelProfile,
 } from '../types'
 
@@ -86,8 +88,38 @@ async function materializeRoad(
   match: RoadMatch,
   profile: TravelProfile,
   signal?: AbortSignal,
+  provider: RoutingProvider = 'auto',
 ): Promise<MaterializedRoad> {
-  const official = await routeFromOfficialGeometry(match, signal)
+  // Driving: rebuild official centerline as a real Kakao/Naver driveable path
+  if (profile === 'driving') {
+    const hasOfficial =
+      (match.lineStrings?.some((l) => l.length >= 2) ?? false) ||
+      (match.geometry != null && match.geometry.length >= 2)
+    if (hasOfficial) {
+      try {
+        const rebuilt = await rebuildOfficialAsDriving(match, provider, signal)
+        if (rebuilt && (rebuilt.coordinates?.length ?? 0) >= 2) {
+          const coords = rebuilt.coordinates!
+          return {
+            match,
+            route: rebuilt,
+            start: coords[0],
+            end: coords[coords.length - 1],
+            lineStrings: lineStringsFromRoute(rebuilt),
+            official: false,
+          }
+        }
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') throw e
+        console.warn(
+          '[roadChain] driving rebuild failed, falling back to official geometry:',
+          e,
+        )
+      }
+    }
+  }
+
+  const official = await routeFromOfficialGeometry(match, signal, provider)
   if (official) {
     return {
       match,
@@ -110,7 +142,7 @@ async function materializeRoad(
     )
   }
 
-  const r = await fetchRoute([match.start, match.end], profile, signal)
+  const r = await fetchRoute([match.start, match.end], profile, signal, provider)
   return {
     match,
     route: r,
@@ -189,6 +221,19 @@ function connectorSteps(conn: RouteResult): RouteStep[] {
   ]
 }
 
+
+function pickChainSource(
+  roads: MaterializedRoad[],
+  anyOfficial: boolean,
+): RouteResult['source'] {
+  if (anyOfficial && roads.every((r) => r.official)) return 'official'
+  const sources = roads.map((r) => r.route.source).filter(Boolean)
+  if (sources.includes('kakao')) return 'kakao'
+  if (sources.includes('naver')) return 'naver'
+  if (sources.includes('osrm')) return 'osrm'
+  return anyOfficial ? 'official' : 'osrm'
+}
+
 export interface ChainedRouteMeta {
   route: RouteResult
   start: LatLng
@@ -205,6 +250,7 @@ export async function buildChainedRoute(
   chain: RoadMatch[],
   profile: TravelProfile,
   signal?: AbortSignal,
+  provider: RoutingProvider = 'auto',
 ): Promise<ChainedRouteMeta> {
   if (!chain.length) {
     throw new Error('체인이 비어 있습니다.')
@@ -213,7 +259,7 @@ export async function buildChainedRoute(
   const materialized: MaterializedRoad[] = []
   for (const match of chain) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-    const road = await materializeRoad(match, profile, signal)
+    const road = await materializeRoad(match, profile, signal, provider)
     const prevEnd = materialized.length
       ? materialized[materialized.length - 1].end
       : null
@@ -257,7 +303,7 @@ export async function buildChainedRoute(
         } else {
           let conn: RouteResult | null = null
           try {
-            conn = await fetchRoute([prev.end, road.start], profile, signal)
+            conn = await fetchRoute([prev.end, road.start], profile, signal, provider)
           } catch (e) {
             if ((e as Error).name === 'AbortError') throw e
             console.warn('[roadChain] inter-road connector failed, using straight:', e)
@@ -376,7 +422,11 @@ export async function buildChainedRoute(
       durationSeconds,
       steps: allSteps,
       fromOfficialGeometry: anyOfficial && !anyNonOfficial,
-      source: anyOfficial ? 'official' : 'osrm',
+      source: pickChainSource(materialized, anyOfficial),
+      fallbackNote: materialized
+        .map((m) => m.route.fallbackNote)
+        .filter(Boolean)
+        .join(' · ') || undefined,
       trafficSegments: trafficSegments.length ? trafficSegments : undefined,
       gaps: allGaps.length ? allGaps : undefined,
     },

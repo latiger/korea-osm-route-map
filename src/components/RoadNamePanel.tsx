@@ -21,11 +21,13 @@ import type {
   RouteGapInfo,
   RouteResult,
   RouteStep,
+  RoutingProvider,
   TravelProfile,
 } from '../types'
 import { reorderRouteSteps } from '../api/orderStepsAlongRoute'
 import { GapList } from './GapList'
 import { ProfileToggle } from './ProfileToggle'
+import { ProviderToggle } from './ProviderToggle'
 import { RouteSummary } from './RouteSummary'
 
 function coordsNear(a: LatLng, b: LatLng, eps = 1e-5): boolean {
@@ -195,6 +197,8 @@ function appendConnectorSteps(
 interface Props {
   profile: TravelProfile
   onProfileChange: (p: TravelProfile) => void
+  provider: RoutingProvider
+  onProviderChange: (p: RoutingProvider) => void
   onMarkersChange: (markers: Array<LatLng & { key: string; label?: string }>) => void
   onRouteChange: (route: RouteResult | null) => void
   onFocusLocation?: (ll: LatLng) => void
@@ -209,6 +213,8 @@ type ChainAction = 'prepend' | 'append' | 'replace'
 export function RoadNamePanel({
   profile,
   onProfileChange,
+  provider,
+  onProviderChange,
   onMarkersChange,
   onRouteChange,
   onFocusLocation,
@@ -271,7 +277,11 @@ export function RoadNamePanel({
     onRouteChange(route)
   }, [chain, route, onMarkersChange, onRouteChange])
 
-  async function routeChain(nextChain: RoadMatch[], p: TravelProfile) {
+  async function routeChain(
+    nextChain: RoadMatch[],
+    p: TravelProfile,
+    prov: RoutingProvider = provider,
+  ) {
     if (!nextChain.length) {
       abortRef.current?.abort()
       setRoute(null)
@@ -285,7 +295,7 @@ export function RoadNamePanel({
     setLoading(true)
     setError(null)
     try {
-      const meta = await buildChainedRoute(nextChain, p, ac.signal)
+      const meta = await buildChainedRoute(nextChain, p, ac.signal, prov)
       if (ac.signal.aborted) return
       metaRef.current = {
         start: meta.start,
@@ -304,9 +314,9 @@ export function RoadNamePanel({
   }
 
   useEffect(() => {
-    if (chain.length) void routeChain(chain, profile)
+    if (chain.length) void routeChain(chain, profile, provider)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile])
+  }, [profile, provider])
 
   async function applyChain(next: RoadMatch[]) {
     setChain(next)
@@ -444,7 +454,12 @@ export function RoadNamePanel({
         route.fromOfficialGeometry || route.source === 'official'
           ? 'driving'
           : profile
-      const conn = await fetchRoute([gap.from, gap.to], connectProfile, ac.signal)
+      const conn = await fetchRoute(
+        [gap.from, gap.to],
+        connectProfile,
+        ac.signal,
+        provider,
+      )
       if (ac.signal.aborted) return
 
       const connector = connectorCoordsFromRoute(conn, gap.from, gap.to)
@@ -559,6 +574,7 @@ export function RoadNamePanel({
             [live.from, live.to],
             connectProfile,
             ac.signal,
+            provider,
           )
           if (ac.signal.aborted) return
 
@@ -691,7 +707,7 @@ export function RoadNamePanel({
           if (molit.length > 0) {
             setMatches(molit)
             setDataNote(
-              '국토교통부 일반국도 도로중심선(공식) geometry를 사용합니다. 구간 사이 짧은 끊김은 길찾기(카카오/OSRM, 상한 있음)로 잇고, 긴 간격은 비워 둡니다.',
+              '국토교통부 일반국도 도로중심선으로 노선을 찾은 뒤, 선택한 길찾기(카카오/네이버)로 실제 주행 경로를 다시 그립니다.',
             )
             if (molit.length === 1 && chainWasEmpty) {
               await applyChain([molit[0]])
@@ -797,6 +813,13 @@ export function RoadNamePanel({
     <div className="panel">
       <form onSubmit={handleSearch} className="stack">
         <ProfileToggle value={profile} onChange={onProfileChange} disabled={loading} />
+        {profile === 'driving' && (
+          <ProviderToggle
+            value={provider}
+            onChange={onProviderChange}
+            disabled={loading}
+          />
+        )}
         <label className="field">
           <span>도로명</span>
           <input
@@ -949,6 +972,9 @@ export function RoadNamePanel({
 
       {error && <p className="error">{error}</p>}
       {connectError && <p className="error">{connectError}</p>}
+      {route?.fallbackNote && (
+        <p className="hint">{route.fallbackNote}</p>
+      )}
       {dataNote && <p className="hint">{dataNote}</p>}
       {route?.gaps && route.gaps.length > 0 && (
         <GapList
@@ -962,12 +988,11 @@ export function RoadNamePanel({
       )}
       <RouteSummary route={route} onStepClick={onFocusLocation} />
       <p className="hint muted">
-        국도(예: 2번국도)는 국토교통부 일반국도 도로중심선 공식 데이터를 우선하고,
-        고속도로는 EX 노선 목록(이름/번호) + OSM Overpass geometry를 사용합니다.
-        그 외 도로명은 Overpass → Nominatim 순입니다. 공식 선형이 있으면 그
-        geometry를 그리고, 없으면 시점·종점을 OSRM으로 연결합니다. 여러 도로를
-        체인으로 이어 붙이면 방향에 맞게 정렬하고, 간격이 크면 연결 경로를
-        삽입합니다.
+        국도(예: 2번국도)는 국토교통부 일반국도 도로중심선으로 노선을 찾은 뒤
+        카카오/네이버 자동차 길찾기로 실제 주행 경로를 재구성합니다. 고속도로는
+        EX 노선 목록 + OSM geometry 기준으로 동일하게 재구성합니다. 도보 모드에서는
+        공식 중심선을 그대로 그립니다. 헤더·패널의 길찾기 제공자(카카오/네이버/자동)로
+        API를 바꿀 수 있습니다.
       </p>
     </div>
   )

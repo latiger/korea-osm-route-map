@@ -360,6 +360,99 @@ function exProxyPlugin(apiKey: string): Plugin {
   }
 }
 
+
+/**
+ * Dev proxy for Naver Cloud Platform Directions 5 (자동차 길찾기).
+ *
+ * - /api/naver/direction → maps.apigw.ntruss.com/map-direction/v1/driving
+ *   (fallback: naveropenapi.apigw.ntruss.com)
+ *
+ * Injects X-NCP-APIGW-API-KEY-ID / X-NCP-APIGW-API-KEY from server env only.
+ * Without keys, responds 503 so the client can fall back.
+ */
+function naverProxyPlugin(clientId: string, clientSecret: string): Plugin {
+  const UPSTREAMS = [
+    'https://maps.apigw.ntruss.com/map-direction/v1/driving',
+    'https://naveropenapi.apigw.ntruss.com/map-direction/v1/driving',
+  ]
+
+  async function proxyNaver(
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
+    if (!clientId || !clientSecret) {
+      res.statusCode = 503
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.end(
+        JSON.stringify({
+          error: 'NAVER_MAP_KEYS_MISSING',
+          message:
+            '네이버 지도 API 키가 없습니다. .env에 NAVER_MAP_CLIENT_ID와 NAVER_MAP_CLIENT_SECRET을 설정한 뒤 개발 서버를 재시작하세요.',
+        }),
+      )
+      return
+    }
+
+    const incoming = new URL(req.url ?? '/', 'http://localhost')
+    const query = incoming.searchParams.toString()
+
+    let lastError: unknown = null
+    for (const base of UPSTREAMS) {
+      const target = query ? `${base}?${query}` : base
+      try {
+        const upstream = await fetch(target, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+            'X-NCP-APIGW-API-KEY-ID': clientId,
+            'X-NCP-APIGW-API-KEY': clientSecret,
+          },
+        })
+        const body = await upstream.text()
+        // Try fallback host on hard upstream failures (5xx / network already caught)
+        if (upstream.status >= 500 && base !== UPSTREAMS[UPSTREAMS.length - 1]) {
+          lastError = new Error(`upstream ${upstream.status}`)
+          continue
+        }
+        res.statusCode = upstream.status
+        res.setHeader(
+          'Content-Type',
+          upstream.headers.get('content-type') ??
+            'application/json; charset=utf-8',
+        )
+        res.end(body)
+        return
+      } catch (e) {
+        lastError = e
+        if (base === UPSTREAMS[UPSTREAMS.length - 1]) break
+      }
+    }
+
+    res.statusCode = 502
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.end(
+      JSON.stringify({
+        error: 'naver_upstream_failed',
+        message: (lastError as Error)?.message ?? '네이버 Directions 요청 실패',
+      }),
+    )
+  }
+
+  return {
+    name: 'naver-proxy',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url ?? ''
+        if (url.startsWith('/api/naver/direction')) {
+          void proxyNaver(req, res)
+          return
+        }
+        next()
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   // Empty prefix loads non-VITE_ vars (keys stay server-only)
@@ -371,11 +464,14 @@ export default defineConfig(({ mode }) => {
   const confmKey =
     env.JUSO_CONFM_KEY?.trim() || env.VITE_JUSO_CONFM_KEY?.trim() || ''
   const exKey = env.EX_API_KEY?.trim() || ''
+  const naverClientId = env.NAVER_MAP_CLIENT_ID?.trim() || ''
+  const naverClientSecret = env.NAVER_MAP_CLIENT_SECRET?.trim() || ''
 
   return {
     plugins: [
       react(),
       kakaoProxyPlugin(kakaoKey),
+      naverProxyPlugin(naverClientId, naverClientSecret),
       jusoProxyPlugin(confmKey),
       exProxyPlugin(exKey),
     ],

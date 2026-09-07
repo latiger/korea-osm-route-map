@@ -1,11 +1,13 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { reverseGeocodeKorea } from './api/geocode'
+import { loadStoredProvider, storeProvider } from './api/route'
 import { MapCanvas } from './components/MapCanvas'
 import { ModeTabs } from './components/ModeTabs'
 import {
   OriginDestPanel,
   type MapResolvedPick,
 } from './components/OriginDestPanel'
+import { ProviderToggle } from './components/ProviderToggle'
 import { RoadNamePanel } from './components/RoadNamePanel'
 import { significantStepMarkers } from './api/displaySteps'
 import type {
@@ -13,6 +15,7 @@ import type {
   LatLng,
   PlaceMode,
   RouteResult,
+  RoutingProvider,
   TravelProfile,
 } from './types'
 import 'leaflet/dist/leaflet.css'
@@ -21,6 +24,9 @@ import './App.css'
 function App() {
   const [mode, setMode] = useState<AppMode>('od')
   const [profile, setProfile] = useState<TravelProfile>('driving')
+  const [provider, setProvider] = useState<RoutingProvider>(() =>
+    loadStoredProvider(),
+  )
   const [markers, setMarkers] = useState<
     Array<LatLng & { key: string; label?: string }>
   >([])
@@ -31,6 +37,10 @@ function App() {
   const [mapPick, setMapPick] = useState<MapResolvedPick | null>(null)
   const [placing, setPlacing] = useState(false)
   const [panelBusy, setPanelBusy] = useState(false)
+
+  useEffect(() => {
+    storeProvider(provider)
+  }, [provider])
 
   const onBusyChange = useCallback((busy: boolean) => {
     setPanelBusy(busy)
@@ -100,16 +110,27 @@ function App() {
     [route?.steps],
   )
 
+  const showTrafficLegend =
+    (route?.source === 'kakao' || route?.source === 'naver') &&
+    (route.trafficSegments?.length ?? 0) > 0
+
   return (
     <div className="app">
       <header className="app-header">
         <div>
           <h1>한국 OSM 경로 지도</h1>
           <p className="subtitle">
-            OpenStreetMap · OSRM · Nominatim 키리스 프로토타입
+            OpenStreetMap · 카카오/네이버 길찾기 · OSRM
           </p>
         </div>
-        <ModeTabs mode={mode} onChange={handleModeChange} />
+        <div className="app-header-controls">
+          <ProviderToggle
+            value={provider}
+            onChange={setProvider}
+            disabled={mapBusy}
+          />
+          <ModeTabs mode={mode} onChange={handleModeChange} />
+        </div>
       </header>
 
       <div className="layout">
@@ -118,6 +139,8 @@ function App() {
             <OriginDestPanel
               profile={profile}
               onProfileChange={setProfile}
+              provider={provider}
+              onProviderChange={setProvider}
               onMarkersChange={onMarkersChange}
               onRouteChange={onRouteChange}
               onFocusLocation={onFocusLocation}
@@ -131,6 +154,8 @@ function App() {
             <RoadNamePanel
               profile={profile}
               onProfileChange={setProfile}
+              provider={provider}
+              onProviderChange={setProvider}
               onMarkersChange={onMarkersChange}
               onRouteChange={onRouteChange}
               onFocusLocation={onFocusLocation}
@@ -172,24 +197,23 @@ function App() {
               장소 검색 중…
             </div>
           )}
-          {route?.source === 'kakao' &&
-            (route.trafficSegments?.length ?? 0) > 0 && (
-              <div className="traffic-legend" aria-label="교통 상태 범례">
-                <span className="traffic-legend-title">교통</span>
-                <span className="traffic-swatch" data-state="4">
-                  원활
-                </span>
-                <span className="traffic-swatch" data-state="3">
-                  서행
-                </span>
-                <span className="traffic-swatch" data-state="2">
-                  지체
-                </span>
-                <span className="traffic-swatch" data-state="1">
-                  정체
-                </span>
-              </div>
-            )}
+          {showTrafficLegend && (
+            <div className="traffic-legend" aria-label="교통 상태 범례">
+              <span className="traffic-legend-title">교통</span>
+              <span className="traffic-swatch" data-state="4">
+                원활
+              </span>
+              <span className="traffic-swatch" data-state="3">
+                서행
+              </span>
+              <span className="traffic-swatch" data-state="2">
+                지체
+              </span>
+              <span className="traffic-swatch" data-state="1">
+                정체
+              </span>
+            </div>
+          )}
           {focusLocation != null && (
             <button
               type="button"

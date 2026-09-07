@@ -8,9 +8,11 @@ import type {
   LatLng,
   PlaceMode,
   RouteResult,
+  RoutingProvider,
   TravelProfile,
 } from '../types'
 import { ProfileToggle } from './ProfileToggle'
+import { ProviderToggle } from './ProviderToggle'
 import { RouteSummary } from './RouteSummary'
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
 
@@ -31,6 +33,8 @@ export interface MapResolvedPick {
 interface Props {
   profile: TravelProfile
   onProfileChange: (p: TravelProfile) => void
+  provider: RoutingProvider
+  onProviderChange: (p: RoutingProvider) => void
   onMarkersChange: (
     markers: Array<LatLng & { key: string; label?: string }>,
   ) => void
@@ -55,6 +59,8 @@ function newViaId(): string {
 export function OriginDestPanel({
   profile,
   onProfileChange,
+  provider,
+  onProviderChange,
   onMarkersChange,
   onRouteChange,
   onFocusLocation,
@@ -152,6 +158,7 @@ export function OriginDestPanel({
     d: GeocodeResult,
     viaPlaces: GeocodeResult[],
     p: TravelProfile,
+    prov: RoutingProvider = provider,
   ) {
     abortRef.current?.abort()
     const ac = new AbortController()
@@ -164,7 +171,7 @@ export function OriginDestPanel({
         ...viaPlaces.map((v) => ({ lat: v.lat, lng: v.lng })),
         { lat: d.lat, lng: d.lng },
       ]
-      const r = await fetchRoute(points, p, ac.signal)
+      const r = await fetchRoute(points, p, ac.signal, prov)
       setRoute(r)
     } catch (e) {
       if ((e as Error).name === 'AbortError') return
@@ -220,10 +227,10 @@ export function OriginDestPanel({
 
   useEffect(() => {
     if (origin && dest) {
-      void computeRoute(origin, dest, filledVias(vias), profile)
+      void computeRoute(origin, dest, filledVias(vias), profile, provider)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile])
+  }, [profile, provider])
 
   // Apply map place-mode picks from App
   useEffect(() => {
@@ -472,6 +479,13 @@ export function OriginDestPanel({
           onChange={onProfileChange}
           disabled={loading}
         />
+        {profile === 'driving' && (
+          <ProviderToggle
+            value={provider}
+            onChange={onProviderChange}
+            disabled={loading}
+          />
+        )}
 
         <div className="kakao-od">
           <div className="kakao-od-rows">
@@ -679,6 +693,9 @@ export function OriginDestPanel({
         )}
       </form>
       {error && <p className="error">{error}</p>}
+      {route?.fallbackNote && (
+        <p className="hint">{route.fallbackNote}</p>
+      )}
       <RouteSummary route={route} onStepClick={onFocusLocation} />
     </div>
   )

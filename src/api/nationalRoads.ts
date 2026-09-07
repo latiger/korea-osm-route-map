@@ -5,6 +5,7 @@ import type {
   RouteResult,
   RouteStep,
   GapBridgeKind,
+  RoutingProvider,
 } from '../types'
 import { parseRoadQuery } from './overpass'
 import { fetchRoute } from './route'
@@ -266,6 +267,7 @@ function makeGapInfo(
 export async function bridgeSegmentGaps(
   ordered: LatLng[][],
   signal?: AbortSignal,
+  provider: RoutingProvider = 'auto',
 ): Promise<{
   lineStrings: LatLng[][]
   connectorLineStrings: LatLng[][]
@@ -306,7 +308,7 @@ export async function bridgeSegmentGaps(
   const routed = await mapPool(toRoute, ROUTE_CONCURRENCY, async (gap) => {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     try {
-      const route = await fetchRoute([gap.a, gap.b], 'driving', signal)
+      const route = await fetchRoute([gap.a, gap.b], 'driving', signal, provider)
       const geom = geometryFromRouteResult(route)
       if (geom && geom.length >= 2) {
         const meters =
@@ -638,6 +640,7 @@ export async function searchNationalRoads(
 export async function routeFromOfficialGeometry(
   match: RoadMatch,
   signal?: AbortSignal,
+  provider: RoutingProvider = 'auto',
 ): Promise<RouteResult | null> {
   const raw =
     match.lineStrings?.filter((l) => l.length >= 2) ??
@@ -647,7 +650,7 @@ export async function routeFromOfficialGeometry(
 
   const ordered = orderAndOrientSegments(raw, match.start)
   const { lineStrings, connectorLineStrings, connectorMeters, gaps: rawGaps } =
-    await bridgeSegmentGaps(ordered, signal)
+    await bridgeSegmentGaps(ordered, signal, provider)
 
   const officialMeters =
     match.lengthMeters ??

@@ -10,7 +10,7 @@ import {
 } from 'react-leaflet'
 import L from 'leaflet'
 import { trafficStateColor } from '../api/kakaoNavi'
-import type { LatLng, PlaceMode, RouteSegment } from '../types'
+import type { LatLng, MapFocus, PlaceMode, RouteSegment } from '../types'
 
 export const SEOUL_CENTER: LatLng = { lat: 37.5665, lng: 126.978 }
 export const DEFAULT_ZOOM = 12
@@ -149,7 +149,12 @@ function drawableConnectors(lines: LatLng[][] | undefined): LatLng[][] {
   if (!lines?.length) return []
   return lines.filter((line) => line.length > 2)
 }
-const FOCUS_ZOOM = 18
+/** Default max zoom for single-point (route step) focus. */
+export const STEP_FOCUS_MAX_ZOOM = 16
+/** Default max zoom when fitting a gap [from, to] bounds. */
+export const GAP_FOCUS_MAX_ZOOM = 14
+/** If gap endpoints are closer than this, fly to `from` instead of fitBounds. */
+const FOCUS_NEAR_EQUAL_M = 50
 
 type MarkerRole = 'start' | 'end' | 'via'
 
@@ -237,19 +242,47 @@ function FitBounds({
   return null
 }
 
-function FlyTo({
+function FocusView({
   focus,
-  onFlew,
+  onFocused,
 }: {
-  focus?: LatLng | null
-  onFlew?: (ll: LatLng) => void
+  focus?: MapFocus | null
+  onFocused?: (points: LatLng[]) => void
 }) {
   const map = useMap()
   useEffect(() => {
-    if (!focus) return
-    map.flyTo([focus.lat, focus.lng], FOCUS_ZOOM, { duration: 0.6 })
-    onFlew?.(focus)
-  }, [map, focus, onFlew])
+    if (!focus?.points?.length) return
+    const points = focus.points
+    const maxZoom = focus.maxZoom ?? STEP_FOCUS_MAX_ZOOM
+    onFocused?.(points)
+
+    if (points.length === 1) {
+      const p = points[0]!
+      map.flyTo([p.lat, p.lng], maxZoom, { duration: 0.6 })
+      return
+    }
+
+    const bounds = L.latLngBounds(
+      points.map((p) => [p.lat, p.lng] as [number, number]),
+    )
+    const sw = bounds.getSouthWest()
+    const ne = bounds.getNorthEast()
+    const spanM = haversineMeters(
+      { lat: sw.lat, lng: sw.lng },
+      { lat: ne.lat, lng: ne.lng },
+    )
+    // from≈to (or tiny span): fly to primary point (first = gap.from) at city zoom
+    if (spanM < FOCUS_NEAR_EQUAL_M) {
+      const p = points[0]!
+      map.flyTo([p.lat, p.lng], maxZoom, { duration: 0.6 })
+      return
+    }
+    map.flyToBounds(bounds, {
+      padding: [72, 72],
+      maxZoom,
+      duration: 0.6,
+    })
+  }, [map, focus, onFocused])
   return null
 }
 
@@ -399,8 +432,8 @@ export interface MapCanvasProps {
   /** Show place-mode toolbar (od mode only) */
   showPlaceControls?: boolean
   onMapPlace?: (role: PlaceMode, ll: LatLng) => void
-  /** Pan/zoom target from route-step click */
-  focus?: LatLng | null
+  /** Pan/zoom target from route-step or gap-list click */
+  focus?: MapFocus | null
   /** Bump to re-run FitBounds (restore full-route view) */
   fitRevision?: number
   /** Numbered route-step markers matching RouteSummary list indices */
@@ -421,13 +454,13 @@ export function MapCanvas({
   fitRevision = 0,
   stepMarkers = [],
 }: MapCanvasProps) {
-  const [highlight, setHighlight] = useState<LatLng | null>(null)
+  const [highlights, setHighlights] = useState<LatLng[]>([])
 
   useEffect(() => {
-    if (!highlight) return
-    const t = window.setTimeout(() => setHighlight(null), 2200)
+    if (!highlights.length) return
+    const t = window.setTimeout(() => setHighlights([]), 2200)
     return () => window.clearTimeout(t)
-  }, [highlight])
+  }, [highlights])
 
   const fitPoints = markers.map((m) => ({ lat: m.lat, lng: m.lng }))
 
@@ -485,7 +518,7 @@ export function MapCanvas({
         }}
       />
       <FitBounds points={fitPoints} route={fitRoute} fitRevision={fitRevision} />
-      <FlyTo focus={focus} onFlew={setHighlight} />
+      <FocusView focus={focus} onFocused={setHighlights} />
       {markers.map((m, i) => (
         <Marker
           key={m.key}
@@ -505,18 +538,19 @@ export function MapCanvas({
           interactive={false}
         />
       ))}
-      {highlight && (
+      {highlights.map((h, i) => (
         <CircleMarker
-          center={[highlight.lat, highlight.lng]}
-          radius={12}
+          key={`focus-hl-${i}-${h.lat}-${h.lng}`}
+          center={[h.lat, h.lng]}
+          radius={i === 0 ? 14 : 10}
           pathOptions={{
-            color: '#38bdf8',
-            fillColor: '#38bdf8',
-            fillOpacity: 0.35,
+            color: i === 0 ? '#f59e0b' : '#38bdf8',
+            fillColor: i === 0 ? '#f59e0b' : '#38bdf8',
+            fillOpacity: 0.4,
             weight: 2,
           }}
         />
-      )}
+      ))}
       {routePieces.map((piece, i) => (
         <Polyline
           key={`route-underlay-${i}`}

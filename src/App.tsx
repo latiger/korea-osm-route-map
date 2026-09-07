@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { reverseGeocodeKorea } from './api/geocode'
 import { loadStoredProvider, storeProvider } from './api/route'
-import { MapCanvas } from './components/MapCanvas'
+import {
+  MapCanvas,
+  GAP_FOCUS_MAX_ZOOM,
+  STEP_FOCUS_MAX_ZOOM,
+} from './components/MapCanvas'
 import { ModeTabs } from './components/ModeTabs'
 import {
   OriginDestPanel,
@@ -13,7 +17,9 @@ import { significantStepMarkers } from './api/displaySteps'
 import type {
   AppMode,
   LatLng,
+  MapFocus,
   PlaceMode,
+  RouteGapInfo,
   RouteResult,
   RoutingProvider,
   TravelProfile,
@@ -31,7 +37,7 @@ function App() {
     Array<LatLng & { key: string; label?: string }>
   >([])
   const [route, setRoute] = useState<RouteResult | null>(null)
-  const [focusLocation, setFocusLocation] = useState<LatLng | null>(null)
+  const [mapFocus, setMapFocus] = useState<MapFocus | null>(null)
   const [fitRevision, setFitRevision] = useState(0)
   const [placeMode, setPlaceMode] = useState<PlaceMode | null>(null)
   const [mapPick, setMapPick] = useState<MapResolvedPick | null>(null)
@@ -54,21 +60,35 @@ function App() {
   )
   const onRouteChange = useCallback((r: RouteResult | null) => {
     setRoute(r)
-    if (r == null) setFocusLocation(null)
+    if (r == null) setMapFocus(null)
   }, [])
   const onFocusLocation = useCallback((ll: LatLng) => {
-    setFocusLocation({ lat: ll.lat, lng: ll.lng })
+    setMapFocus({
+      points: [{ lat: ll.lat, lng: ll.lng }],
+      maxZoom: STEP_FOCUS_MAX_ZOOM,
+    })
+  }, [])
+
+  const onFocusGap = useCallback((gap: RouteGapInfo) => {
+    // Primary 접점 = gap.from (end of previous connected piece); fit [from, to].
+    setMapFocus({
+      points: [
+        { lat: gap.from.lat, lng: gap.from.lng },
+        { lat: gap.to.lat, lng: gap.to.lng },
+      ],
+      maxZoom: GAP_FOCUS_MAX_ZOOM,
+    })
   }, [])
 
   const onPanelReset = useCallback(() => {
-    setFocusLocation(null)
+    setMapFocus(null)
     setPlaceMode(null)
     setMapPick(null)
     setFitRevision((n) => n + 1)
   }, [])
 
   const showFullRoute = useCallback(() => {
-    setFocusLocation(null)
+    setMapFocus(null)
     setFitRevision((n) => n + 1)
   }, [])
 
@@ -76,7 +96,7 @@ function App() {
     setMode(m)
     setMarkers([])
     setRoute(null)
-    setFocusLocation(null)
+    setMapFocus(null)
     setPlaceMode(null)
     setMapPick(null)
     setPanelBusy(false)
@@ -159,6 +179,7 @@ function App() {
               onMarkersChange={onMarkersChange}
               onRouteChange={onRouteChange}
               onFocusLocation={onFocusLocation}
+              onFocusGap={onFocusGap}
               onReset={onPanelReset}
               onBusyChange={onBusyChange}
             />
@@ -189,7 +210,7 @@ function App() {
             onMapPlace={(role, ll) => {
               void handleMapPlace(role, ll)
             }}
-            focus={focusLocation}
+            focus={mapFocus}
             fitRevision={fitRevision}
             stepMarkers={stepMarkers}
           />
@@ -215,7 +236,7 @@ function App() {
               </span>
             </div>
           )}
-          {focusLocation != null && (
+          {mapFocus != null && (
             <button
               type="button"
               className="show-full-route"

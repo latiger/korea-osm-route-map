@@ -202,6 +202,8 @@ interface Props {
   onMarkersChange: (markers: Array<LatLng & { key: string; label?: string }>) => void
   onRouteChange: (route: RouteResult | null) => void
   onFocusLocation?: (ll: LatLng) => void
+  /** Focus map on a gap (접점 = gap.from, fit [from,to]) */
+  onFocusGap?: (gap: RouteGapInfo) => void
   /** Full panel reset (App can clear focus / fit) */
   onReset?: () => void
   /** Notify App when search / geometry / gap connect is busy */
@@ -218,6 +220,7 @@ export function RoadNamePanel({
   onMarkersChange,
   onRouteChange,
   onFocusLocation,
+  onFocusGap,
   onReset,
   onBusyChange,
 }: Props) {
@@ -979,7 +982,7 @@ export function RoadNamePanel({
       {route?.gaps && route.gaps.length > 0 && (
         <GapList
           gaps={route.gaps}
-          onFocusLocation={onFocusLocation}
+          onFocusGap={onFocusGap}
           onConnectGap={connectGap}
           connectingId={connectingId}
           onConnectAllGaps={connectAllGaps}

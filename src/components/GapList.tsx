@@ -1,9 +1,9 @@
 import { formatDistance } from '../api/osrm'
-import type { GapBridgeKind, LatLng, RouteGapInfo } from '../types'
+import type { GapBridgeKind, RouteGapInfo } from '../types'
 
 interface Props {
   gaps: RouteGapInfo[]
-  onFocusLocation?: (ll: LatLng) => void
+  onFocusGap?: (gap: RouteGapInfo) => void
   onConnectGap?: (gap: RouteGapInfo) => void
   connectingId?: string | null
   onConnectAllGaps?: () => void
@@ -20,20 +20,13 @@ const KIND_BADGE: Record<
   blocked: { text: '연결불가', className: 'gap-badge gap-badge-blocked' },
 }
 
-function gapFocusPoint(gap: RouteGapInfo): LatLng {
-  return {
-    lat: (gap.from.lat + gap.to.lat) / 2,
-    lng: (gap.from.lng + gap.to.lng) / 2,
-  }
-}
-
 function canConnect(gap: RouteGapInfo): boolean {
   return gap.kind === 'skipped' || gap.kind === 'straight'
 }
 
 export function GapList({
   gaps,
-  onFocusLocation,
+  onFocusGap,
   onConnectGap,
   connectingId,
   onConnectAllGaps,
@@ -65,8 +58,7 @@ export function GapList({
       <ul className="gap-list-items">
         {gaps.map((gap) => {
           const badge = KIND_BADGE[gap.kind]
-          const focus = gapFocusPoint(gap)
-          const clickable = Boolean(onFocusLocation)
+          const clickable = Boolean(onFocusGap)
           const showConnect = Boolean(onConnectGap) && canConnect(gap)
           const connecting = connectingId === gap.id
           const body = (
@@ -85,7 +77,7 @@ export function GapList({
                   <button
                     type="button"
                     className="gap-list-button"
-                    onClick={() => onFocusLocation?.(focus)}
+                    onClick={() => onFocusGap?.(gap)}
                   >
                     {body}
                   </button>

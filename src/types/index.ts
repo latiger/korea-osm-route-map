@@ -9,6 +9,14 @@ export interface LatLng {
   lng: number
 }
 
+/** Map pan/zoom target from step or gap list clicks. */
+export interface MapFocus {
+  /** One or more points; ≥2 distinct points use fitBounds. */
+  points: LatLng[]
+  /** Cap for flyTo / fitBounds (steps ~16, gaps ~14). */
+  maxZoom?: number
+}
+
 export interface GeocodeResult {
   id: string
   label: string

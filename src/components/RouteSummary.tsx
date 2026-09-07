@@ -4,6 +4,7 @@ import {
   formatDuration,
   maneuverSymbol,
 } from '../api/osrm'
+import { significantDisplaySteps } from '../api/displaySteps'
 import type { LatLng, RouteResult } from '../types'
 
 interface Props {
@@ -30,7 +31,7 @@ export function RouteSummary({ route, onStepClick }: Props) {
 
   if (!route) return null
 
-  const list = route.steps ?? []
+  const list = significantDisplaySteps(route.steps)
 
   return (
     <div className="route-summary" aria-live="polite">
@@ -62,7 +63,7 @@ export function RouteSummary({ route, onStepClick }: Props) {
 
       {open && list.length > 0 && (
         <ol className="route-steps" aria-label="경로 단계">
-          {list.map((step, i) => {
+          {list.map((step) => {
             const symbol = maneuverSymbol(step.type, step.modifier)
             const rawName = (step.name ?? '').trim()
             // Prefer filtering OD at source; if type 100/101 leaks through, never
@@ -96,7 +97,7 @@ export function RouteSummary({ route, onStepClick }: Props) {
             const body = (
               <>
                 <span className="route-step-num" aria-hidden>
-                  {i + 1}
+                  {step.n}
                 </span>
                 <span className="route-step-symbol" aria-hidden>
                   {symbol}
@@ -116,7 +117,7 @@ export function RouteSummary({ route, onStepClick }: Props) {
 
             return (
               <li
-                key={`${i}-${step.type}-${step.name}`}
+                key={`${step.n}-${step.type}-${step.name}`}
                 className="route-step"
               >
                 {clickable && loc ? (

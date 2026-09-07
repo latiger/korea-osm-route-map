@@ -42,6 +42,8 @@ interface Props {
   mapPick?: MapResolvedPick | null
   /** Armed map place-mode (출발/도착/경유) for row highlight */
   placeMode?: PlaceMode | null
+  /** Notify App when route search / fetch is busy (map loading bar) */
+  onBusyChange?: (busy: boolean) => void
 }
 
 const AMBIGUOUS_HINT = '동명이 여러 곳입니다. 목록에서 선택해 주세요.'
@@ -59,6 +61,7 @@ export function OriginDestPanel({
   onReset,
   mapPick = null,
   placeMode = null,
+  onBusyChange,
 }: Props) {
   const [originText, setOriginText] = useState('서울역')
   const [destText, setDestText] = useState('광화문')
@@ -81,6 +84,11 @@ export function OriginDestPanel({
   originRef.current = origin
   destRef.current = dest
   viasRef.current = vias
+
+  useEffect(() => {
+    onBusyChange?.(loading)
+    return () => onBusyChange?.(false)
+  }, [loading, onBusyChange])
 
   const searchOrigin = useDebouncedCallback(async (q: string) => {
     if (!q.trim()) {

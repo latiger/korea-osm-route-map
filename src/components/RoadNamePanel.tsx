@@ -147,6 +147,8 @@ interface Props {
   onFocusLocation?: (ll: LatLng) => void
   /** Full panel reset (App can clear focus / fit) */
   onReset?: () => void
+  /** Notify App when search / geometry / gap connect is busy */
+  onBusyChange?: (busy: boolean) => void
 }
 
 type ChainAction = 'prepend' | 'append' | 'replace'
@@ -158,6 +160,7 @@ export function RoadNamePanel({
   onRouteChange,
   onFocusLocation,
   onReset,
+  onBusyChange,
 }: Props) {
   const [roadText, setRoadText] = useState('2번국도')
   const [matches, setMatches] = useState<RoadMatch[]>([])
@@ -189,6 +192,14 @@ export function RoadNamePanel({
   const [connectingAll, setConnectingAll] = useState(false)
   const [connectError, setConnectError] = useState<string | null>(null)
   const connectAbortRef = useRef<AbortController | null>(null)
+
+  const routingBusy =
+    loading || connectingId != null || connectingAll
+
+  useEffect(() => {
+    onBusyChange?.(routingBusy)
+    return () => onBusyChange?.(false)
+  }, [routingBusy, onBusyChange])
 
   useEffect(() => {
     if (!chain.length) {

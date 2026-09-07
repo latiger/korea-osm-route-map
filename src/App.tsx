@@ -7,6 +7,7 @@ import {
   type MapResolvedPick,
 } from './components/OriginDestPanel'
 import { RoadNamePanel } from './components/RoadNamePanel'
+import { significantStepMarkers } from './api/displaySteps'
 import type {
   AppMode,
   LatLng,
@@ -29,6 +30,13 @@ function App() {
   const [placeMode, setPlaceMode] = useState<PlaceMode | null>(null)
   const [mapPick, setMapPick] = useState<MapResolvedPick | null>(null)
   const [placing, setPlacing] = useState(false)
+  const [panelBusy, setPanelBusy] = useState(false)
+
+  const onBusyChange = useCallback((busy: boolean) => {
+    setPanelBusy(busy)
+  }, [])
+
+  const mapBusy = panelBusy || placing
 
   const onMarkersChange = useCallback(
     (m: Array<LatLng & { key: string; label?: string }>) => setMarkers(m),
@@ -61,6 +69,7 @@ function App() {
     setFocusLocation(null)
     setPlaceMode(null)
     setMapPick(null)
+    setPanelBusy(false)
   }
 
   async function handleMapPlace(role: PlaceMode, ll: LatLng) {
@@ -86,32 +95,10 @@ function App() {
     }
   }
 
-  const stepMarkers = useMemo(() => {
-    const steps = route?.steps
-    if (!steps?.length) return []
-
-    const withLoc = steps
-      .map((s, i) => ({ s, n: i + 1 }))
-      .filter(({ s }) => s.location != null)
-
-    const selected =
-      withLoc.length > 60
-        ? withLoc.filter(
-            ({ s }) =>
-              s.distanceMeters > 0 ||
-              s.type === 'connect' ||
-              s.type === 'depart' ||
-              s.type === 'arrive',
-          )
-        : withLoc
-
-    return selected.map(({ s, n }) => ({
-      n,
-      lat: s.location!.lat,
-      lng: s.location!.lng,
-      label: s.label,
-    }))
-  }, [route?.steps])
+  const stepMarkers = useMemo(
+    () => significantStepMarkers(route?.steps),
+    [route?.steps],
+  )
 
   return (
     <div className="app">
@@ -135,6 +122,7 @@ function App() {
               onRouteChange={onRouteChange}
               onFocusLocation={onFocusLocation}
               onReset={onPanelReset}
+              onBusyChange={onBusyChange}
               mapPick={mapPick}
               placeMode={placeMode}
             />
@@ -147,11 +135,20 @@ function App() {
               onRouteChange={onRouteChange}
               onFocusLocation={onFocusLocation}
               onReset={onPanelReset}
+              onBusyChange={onBusyChange}
             />
           )}
         </aside>
 
         <main className="map-wrap">
+          {mapBusy && (
+            <div
+              className="map-loading-bar"
+              role="progressbar"
+              aria-label="경로 불러오는 중"
+              aria-busy="true"
+            />
+          )}
           <MapCanvas
             markers={markers}
             route={route?.coordinates ?? []}

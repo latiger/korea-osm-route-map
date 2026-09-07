@@ -8,6 +8,10 @@ import {
   looksLikeOpenWaterChord,
   officialLandUnderlay,
 } from './openWaterFilter'
+import {
+  FERRY_ISLAND_EXCLUDED_HINT,
+  selectCarDrivableComponent,
+} from './carDrivable'
 import { fetchRoute } from './route'
 import type {
   LatLng,
@@ -452,11 +456,19 @@ export async function rebuildOfficialAsDriving(
   if (!raw.length) return null
 
   // Preserve segment boundaries for official gap listing (same as official path).
-  const ordered = clipOrderedSegmentsToDeclaredEnds(
+  const orderedFull = clipOrderedSegmentsToDeclaredEnds(
     orderAndOrientSegments(raw, match.start),
     match.start,
     match.end,
   )
+
+  // Car-drivable contiguous component only (mainland + bridge-linked).
+  // Ferry-only island chains / open-water chords are excluded from sampling,
+  // underlay, gaps, and markers.
+  const car = selectCarDrivableComponent(orderedFull, match.end, match.start)
+  const ordered = car.lines
+  if (!ordered.length) return null
+
   const flat = flattenOrderedLines(ordered)
   if (flat.length < 2) return null
 
@@ -475,7 +487,7 @@ export async function rebuildOfficialAsDriving(
   if (!parts.length) return null
 
   const stitched = await stitchDrivingResults(parts, provider, signal)
-  // Geometry-only official gaps (no second Kakao pass) so GapList still works.
+  // Gaps only within the car-drivable component (omit pure ferry-island hops).
   const { gaps: rawGaps, connectorLineStrings } = listOfficialSegmentGaps(ordered)
   const gaps = rawGaps.map((g) => ({
     ...g,
@@ -485,10 +497,10 @@ export async function rebuildOfficialAsDriving(
 
   // Keep a light road-name prefix on steps for multi-road chains
   const roadName = match.name
-  // Official land centerlines as underlay: ferry legs are dropped from
-  // Kakao/Naver, bridges are kept; island roads still appear from MOLIT
-  // geometry (open-water chords between islands are filtered out).
+  // Official land underlay from the car-drivable component only.
   const landUnderlay = officialLandUnderlay(ordered)
+  const ferryHint = car.droppedFerryIslands ? FERRY_ISLAND_EXCLUDED_HINT : undefined
+  const fallbackNote = [stitched.fallbackNote, ferryHint].filter(Boolean).join(' · ') || undefined
   return {
     ...stitched,
     lineStrings: landUnderlay.length ? landUnderlay : undefined,
@@ -501,5 +513,8 @@ export async function rebuildOfficialAsDriving(
     connectorLineStrings: connectorLineStrings.length
       ? connectorLineStrings
       : undefined,
+    trimStart: car.start,
+    trimEnd: car.end,
+    fallbackNote,
   }
 }

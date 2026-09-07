@@ -92,6 +92,12 @@ export interface RouteResult {
   fallbackNote?: string
   /** Discontinuous gaps within / between roads (official geometry) */
   gaps?: RouteGapInfo[]
+  /**
+   * After ferry-island exclusion on official driving rebuild: tips for
+   * start/end markers (mainland / bridge-linked component only).
+   */
+  trimStart?: LatLng
+  trimEnd?: LatLng
 }
 
 export type TrafficState = 0 | 1 | 2 | 3 | 4 | 6

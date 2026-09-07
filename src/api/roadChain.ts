@@ -100,14 +100,18 @@ async function materializeRoad(
         const rebuilt = await rebuildOfficialAsDriving(match, provider, signal)
         if (rebuilt && (rebuilt.coordinates?.length ?? 0) >= 2) {
           const coords = rebuilt.coordinates!
+          // Prefer car-drivable tips after ferry-island exclusion; else declared
+          // ends only when they lie on the rebuilt geometry path.
           const start =
-            Number.isFinite(match.start?.lat) && Number.isFinite(match.start?.lng)
+            rebuilt.trimStart ??
+            (Number.isFinite(match.start?.lat) && Number.isFinite(match.start?.lng)
               ? match.start
-              : coords[0]
+              : coords[0]!)
           const end =
-            Number.isFinite(match.end?.lat) && Number.isFinite(match.end?.lng)
+            rebuilt.trimEnd ??
+            (Number.isFinite(match.end?.lat) && Number.isFinite(match.end?.lng)
               ? match.end
-              : coords[coords.length - 1]
+              : coords[coords.length - 1]!)
           return {
             match,
             route: rebuilt,

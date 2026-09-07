@@ -56,7 +56,9 @@ export function RouteSummary({ route, onStepClick }: Props) {
                 ? '도착지'
                 : step.type === 'depart'
                   ? '출발지'
-                  : '도로')
+                  : step.type === 'connect'
+                    ? '연결 구간'
+                    : '도로')
             const dist =
               step.distanceMeters > 0
                 ? formatDistance(step.distanceMeters)

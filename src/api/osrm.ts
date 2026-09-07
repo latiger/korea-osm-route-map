@@ -108,6 +108,7 @@ export function maneuverSymbol(
 
   if (t === 'depart') return '●'
   if (t === 'arrive') return '◎'
+  if (t === 'connect') return '↔'
   if (t === 'roundabout' || t === 'rotary' || t === 'exit roundabout' || t === 'exit rotary')
     return '↻'
   if (m === 'uturn') return '↩'

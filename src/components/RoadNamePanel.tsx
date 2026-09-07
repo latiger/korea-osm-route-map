@@ -13,12 +13,13 @@ import {
 import { searchRoadsNominatim } from '../api/nominatim'
 import { searchRoadsOverpass } from '../api/overpass'
 import { buildChainMarkers, buildChainedRoute } from '../api/roadChain'
-import { fetchRoute, formatDistance } from '../api/route'
+import { fetchRoute } from '../api/route'
 import type {
   LatLng,
   RoadMatch,
   RouteGapInfo,
   RouteResult,
+  RouteStep,
   TravelProfile,
 } from '../types'
 import { GapList } from './GapList'
@@ -50,6 +51,32 @@ function sameStraightConnector(line: LatLng[], from: LatLng, to: LatLng): boolea
     (coordsNear(a, from) && coordsNear(b, to)) ||
     (coordsNear(a, to) && coordsNear(b, from))
   )
+}
+
+
+/**
+ * Append connector turn-by-turn steps under a section header.
+ * Layout (header + maneuvers) is meant for reuse by future 네비게이션.
+ */
+function appendConnectorSteps(
+  baseSteps: RouteStep[],
+  conn: RouteResult,
+  gap: RouteGapInfo,
+): RouteStep[] {
+  const header: RouteStep = {
+    type: 'connect',
+    label: '이어서 연결',
+    name: gap.label || '연결 구간',
+    distanceMeters: conn.distanceMeters,
+    durationSeconds: conn.durationSeconds,
+    location: gap.from,
+  }
+  // Drop redundant connector depart/arrive when nesting under the header
+  const maneuvers = (conn.steps ?? []).filter((s) => {
+    const t = (s.type ?? '').toLowerCase()
+    return t !== 'depart' && t !== 'arrive'
+  })
+  return [...baseSteps, header, ...maneuvers]
 }
 
 interface Props {
@@ -317,17 +344,7 @@ export function RoadNamePanel({
         g.id === gap.id ? { ...g, kind: 'routed' as const } : g,
       )
 
-      const steps = [
-        ...route.steps,
-        {
-          type: 'connect',
-          label: `연결 · ${formatDistance(conn.distanceMeters)}`,
-          name: '연결',
-          distanceMeters: conn.distanceMeters,
-          durationSeconds: conn.durationSeconds,
-          location: gap.from,
-        },
-      ]
+      const steps = appendConnectorSteps(route.steps, conn, gap)
 
       const mergedTraffic =
         conn.trafficSegments?.length
@@ -414,17 +431,7 @@ export function RoadNamePanel({
           const gaps = (current.gaps ?? []).map((g) =>
             g.id === live.id ? { ...g, kind: 'routed' as const } : g,
           )
-          const steps = [
-            ...current.steps,
-            {
-              type: 'connect',
-              label: `연결 · ${formatDistance(conn.distanceMeters)}`,
-              name: '연결',
-              distanceMeters: conn.distanceMeters,
-              durationSeconds: conn.durationSeconds,
-              location: live.from,
-            },
-          ]
+          const steps = appendConnectorSteps(current.steps, conn, live)
           const mergedTraffic =
             conn.trafficSegments?.length
               ? [...(current.trafficSegments ?? []), ...conn.trafficSegments]

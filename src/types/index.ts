@@ -91,7 +91,7 @@ export interface RouteSegment {
   name?: string
 }
 
-export type GapBridgeKind = 'routed' | 'straight' | 'skipped'
+export type GapBridgeKind = 'routed' | 'straight' | 'skipped' | 'blocked'
 
 export interface RouteGapInfo {
   id: string
@@ -100,10 +100,12 @@ export interface RouteGapInfo {
   from: LatLng
   to: LatLng
   gapMeters: number
-  kind: GapBridgeKind // routed=길찾기연결, straight=직선점선, skipped=미연결(>5km 등)
+  kind: GapBridgeKind // routed=길찾기연결, straight=직선점선, skipped=미연결(>5km 등), blocked=유턴 등으로 거부
   /**
    * Index of the ordered official segment that ends at `from`
    * (gap lies between ordered[afterSegmentIndex] and ordered[afterSegmentIndex+1]).
    */
   afterSegmentIndex?: number
+  /** Korean explanation when kind is blocked (or a failed connect attempt) */
+  rejectReason?: string
 }

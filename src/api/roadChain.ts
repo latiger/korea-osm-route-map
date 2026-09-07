@@ -1,5 +1,6 @@
 import { routeFromOfficialGeometry } from './nationalRoads'
 import { fetchRoute } from './route'
+import { assessConnectorQuality } from './connectorQuality'
 import type {
   GapBridgeKind,
   LatLng,
@@ -263,23 +264,51 @@ export async function buildChainedRoute(
             kind = 'straight'
           }
 
+          let rejectReason: string | undefined
           if (conn) {
-            kind = 'routed'
-            distanceMeters += conn.distanceMeters
-            durationSeconds += conn.durationSeconds
-            allSteps.push(...connectorSteps(conn))
-
-            if (conn.trafficSegments?.length) {
-              trafficSegments.push(...conn.trafficSegments)
-              for (const seg of conn.trafficSegments) {
-                allCoords.push(...seg.coordinates)
-              }
+            const connGeom =
+              conn.trafficSegments?.length
+                ? conn.trafficSegments.flatMap((s) => s.coordinates)
+                : lineStringsFromRoute(conn).flat()
+            const prevPoly =
+              prev.lineStrings[prev.lineStrings.length - 1] ?? undefined
+            const nextPoly = road.lineStrings[0] ?? undefined
+            const quality = assessConnectorQuality({
+              gap: { from: prev.end, to: road.start, gapMeters: gap },
+              connector:
+                connGeom.length >= 2
+                  ? connGeom
+                  : [prev.end, road.start],
+              previousPolyline: prevPoly,
+              nextPolyline: nextPoly,
+              connectorDistanceMeters: conn.distanceMeters,
+            })
+            if (!quality.ok) {
+              kind = 'blocked'
+              rejectReason = quality.reason
+              const straight: LatLng[] = [prev.end, road.start]
+              allConnectorLineStrings.push(straight)
+              allCoords.push(...straight)
+              distanceMeters += gap
+              durationSeconds += (gap / 1000 / 60) * 3600
             } else {
-              const connLines = lineStringsFromRoute(conn)
-              allLineStrings.push(...connLines)
-              for (const line of connLines) allCoords.push(...line)
+              kind = 'routed'
+              distanceMeters += conn.distanceMeters
+              durationSeconds += conn.durationSeconds
+              allSteps.push(...connectorSteps(conn))
+
+              if (conn.trafficSegments?.length) {
+                trafficSegments.push(...conn.trafficSegments)
+                for (const seg of conn.trafficSegments) {
+                  allCoords.push(...seg.coordinates)
+                }
+              } else {
+                const connLines = lineStringsFromRoute(conn)
+                allLineStrings.push(...connLines)
+                for (const line of connLines) allCoords.push(...line)
+              }
+              anyNonOfficial = true
             }
-            anyNonOfficial = true
           } else {
             kind = 'straight'
             const straight: LatLng[] = [prev.end, road.start]
@@ -304,6 +333,7 @@ export async function buildChainedRoute(
             to: road.start,
             gapMeters: gap,
             kind,
+            ...(rejectReason ? { rejectReason } : {}),
           })
           junctions.push(prev.end)
         }

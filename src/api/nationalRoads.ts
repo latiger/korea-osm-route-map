@@ -8,6 +8,7 @@ import type {
 } from '../types'
 import { parseRoadQuery } from './overpass'
 import { fetchRoute } from './route'
+import { assessConnectorQuality } from './connectorQuality'
 import {
   orderStepsAlongRoute,
   pathPointsFromRoute,
@@ -238,6 +239,7 @@ function makeGapInfo(
   gapMeters: number,
   kind: GapBridgeKind,
   labelPrefix = '내부 끊김',
+  rejectReason?: string,
 ): RouteGapInfo {
   // `index` is the next segment (ordered[i]); gap is after ordered[i-1]
   return {
@@ -248,6 +250,7 @@ function makeGapInfo(
     gapMeters,
     kind,
     afterSegmentIndex: index - 1,
+    ...(rejectReason ? { rejectReason } : {}),
   }
 }
 
@@ -258,7 +261,7 @@ function makeGapInfo(
  * - > 5km: skip (no connector — avoids bogus long jumps / distance bloat)
  * Remaining mid-size gaps after the API cap fall back to short straight dashes.
  * Official parts stay in `lineStrings`; bridges go to `connectorLineStrings`.
- * Every gap > GAP_IGNORE_M is recorded in `gaps` (routed / straight / skipped).
+ * Every gap > GAP_IGNORE_M is recorded in `gaps` (routed / straight / skipped / blocked).
  */
 export async function bridgeSegmentGaps(
   ordered: LatLng[][],
@@ -298,6 +301,8 @@ export async function bridgeSegmentGaps(
   const toRoute = sorted.slice(0, MAX_ROUTED_CONNECTORS)
   const routedIndexes = new Set(toRoute.map((g) => g.index))
 
+  const reasonByGap = new Map<number, string>()
+
   const routed = await mapPool(toRoute, ROUTE_CONCURRENCY, async (gap) => {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     try {
@@ -306,7 +311,32 @@ export async function bridgeSegmentGaps(
       if (geom && geom.length >= 2) {
         const meters =
           route.distanceMeters > 0 ? route.distanceMeters : pathLengthMeters(geom)
-        return { index: gap.index, line: geom, meters, ok: true as const }
+        const prev = ordered[gap.index - 1]
+        const next = ordered[gap.index]
+        const quality = assessConnectorQuality({
+          gap: { from: gap.a, to: gap.b, gapMeters: gap.gapMeters },
+          connector: geom,
+          previousPolyline: prev,
+          nextPolyline: next,
+          connectorDistanceMeters: meters,
+        })
+        if (!quality.ok) {
+          return {
+            index: gap.index,
+            line: [gap.a, gap.b],
+            meters: gap.gapMeters,
+            ok: false as const,
+            blocked: true as const,
+            reason: quality.reason,
+          }
+        }
+        return {
+          index: gap.index,
+          line: geom,
+          meters,
+          ok: true as const,
+          blocked: false as const,
+        }
       }
     } catch (e) {
       if ((e as Error).name === 'AbortError') throw e
@@ -318,14 +348,22 @@ export async function bridgeSegmentGaps(
       line: [gap.a, gap.b],
       meters: gap.gapMeters,
       ok: false as const,
+      blocked: false as const,
     }
   })
 
   for (const r of routed) {
     connectorByGap.set(r.index, r.line)
     connectorMeters += r.meters
-    kindByGap.set(r.index, r.ok ? 'routed' : 'straight')
-    if (r.ok) routedConnectorCount += 1
+    if (r.ok) {
+      kindByGap.set(r.index, 'routed')
+      routedConnectorCount += 1
+    } else if (r.blocked) {
+      kindByGap.set(r.index, 'blocked')
+      if (r.reason) reasonByGap.set(r.index, r.reason)
+    } else {
+      kindByGap.set(r.index, 'straight')
+    }
   }
 
   // Remaining mid-size gaps (over API cap): short straight dashed
@@ -344,7 +382,15 @@ export async function bridgeSegmentGaps(
     .sort((a, b) => a[0] - b[0])
     .map(([index, kind]) => {
       const meta = metaByGap.get(index)!
-      return makeGapInfo(index, meta.a, meta.b, meta.gapMeters, kind)
+      return makeGapInfo(
+        index,
+        meta.a,
+        meta.b,
+        meta.gapMeters,
+        kind,
+        '내부 끊김',
+        reasonByGap.get(index),
+      )
     })
 
   return {

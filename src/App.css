@@ -908,6 +908,20 @@ button.danger-outline:hover:not(:disabled) {
   border: 1px solid rgba(248, 113, 113, 0.35);
 }
 
+.gap-badge-blocked {
+  background: rgba(251, 146, 60, 0.16);
+  color: #fb923c;
+  border: 1px solid rgba(251, 146, 60, 0.4);
+}
+
+.gap-reject-reason {
+  margin: 2px 0 0 0;
+  padding: 0 4px 2px;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #fb923c;
+}
+
 .road-match-item {
   display: flex;
   flex-direction: column;

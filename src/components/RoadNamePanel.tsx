@@ -14,6 +14,7 @@ import { searchRoadsNominatim } from '../api/nominatim'
 import { searchRoadsOverpass } from '../api/overpass'
 import { buildChainMarkers, buildChainedRoute } from '../api/roadChain'
 import { fetchRoute } from '../api/route'
+import { assessConnectorQuality } from '../api/connectorQuality'
 import type {
   LatLng,
   RoadMatch,
@@ -53,6 +54,21 @@ function sameStraightConnector(line: LatLng[], from: LatLng, to: LatLng): boolea
     (coordsNear(a, to) && coordsNear(b, from))
   )
 }
+
+
+function adjacentOfficialPolylines(
+  route: RouteResult,
+  gap: RouteGapInfo,
+): { previousPolyline?: LatLng[]; nextPolyline?: LatLng[] } {
+  const lines = route.lineStrings
+  if (!lines?.length || gap.afterSegmentIndex == null) return {}
+  const i = gap.afterSegmentIndex
+  return {
+    previousPolyline: lines[i],
+    nextPolyline: lines[i + 1],
+  }
+}
+
 
 function haversineMeters(a: LatLng, b: LatLng): number {
   const R = 6371000
@@ -432,6 +448,26 @@ export function RoadNamePanel({
       if (ac.signal.aborted) return
 
       const connector = connectorCoordsFromRoute(conn, gap.from, gap.to)
+      const adjacent = adjacentOfficialPolylines(route, gap)
+      const quality = assessConnectorQuality({
+        gap,
+        connector,
+        previousPolyline: adjacent.previousPolyline,
+        nextPolyline: adjacent.nextPolyline,
+        connectorDistanceMeters: conn.distanceMeters,
+      })
+      if (!quality.ok) {
+        const reason = quality.reason ?? '유턴이 필요해 연결할 수 없음'
+        const gaps = (route.gaps ?? []).map((g) =>
+          g.id === gap.id
+            ? { ...g, kind: 'blocked' as const, rejectReason: reason }
+            : g,
+        )
+        applyConnectedRoute({ ...route, gaps })
+        setConnectError(reason)
+        return
+      }
+
       const prevConnectors = route.connectorLineStrings ?? []
       let nextConnectors: LatLng[][]
       if (gap.kind === 'straight') {
@@ -455,7 +491,9 @@ export function RoadNamePanel({
       }
 
       const gaps = (route.gaps ?? []).map((g) =>
-        g.id === gap.id ? { ...g, kind: 'routed' as const } : g,
+        g.id === gap.id
+          ? { ...g, kind: 'routed' as const, rejectReason: undefined }
+          : g,
       )
 
       const steps = appendConnectorSteps(route.steps, conn, gap)
@@ -525,6 +563,27 @@ export function RoadNamePanel({
           if (ac.signal.aborted) return
 
           const connector = connectorCoordsFromRoute(conn, live.from, live.to)
+          const adjacent = adjacentOfficialPolylines(current, live)
+          const quality = assessConnectorQuality({
+            gap: live,
+            connector,
+            previousPolyline: adjacent.previousPolyline,
+            nextPolyline: adjacent.nextPolyline,
+            connectorDistanceMeters: conn.distanceMeters,
+          })
+          if (!quality.ok) {
+            const reason = quality.reason ?? '유턴이 필요해 연결할 수 없음'
+            const gaps = (current.gaps ?? []).map((g) =>
+              g.id === live.id
+                ? { ...g, kind: 'blocked' as const, rejectReason: reason }
+                : g,
+            )
+            current = { ...current, gaps }
+            applyConnectedRoute(current)
+            setConnectError(reason)
+            continue
+          }
+
           const prevConnectors = current.connectorLineStrings ?? []
           let nextConnectors: LatLng[][]
           if (live.kind === 'straight') {
@@ -550,7 +609,9 @@ export function RoadNamePanel({
           }
 
           const gaps = (current.gaps ?? []).map((g) =>
-            g.id === live.id ? { ...g, kind: 'routed' as const } : g,
+            g.id === live.id
+              ? { ...g, kind: 'routed' as const, rejectReason: undefined }
+              : g,
           )
           const steps = appendConnectorSteps(current.steps, conn, live)
           const mergedTraffic =

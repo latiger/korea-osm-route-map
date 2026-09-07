@@ -17,6 +17,7 @@ const KIND_BADGE: Record<
   routed: { text: '연결됨', className: 'gap-badge gap-badge-routed' },
   straight: { text: '점선', className: 'gap-badge gap-badge-straight' },
   skipped: { text: '미연결', className: 'gap-badge gap-badge-skipped' },
+  blocked: { text: '연결불가', className: 'gap-badge gap-badge-blocked' },
 }
 
 function gapFocusPoint(gap: RouteGapInfo): LatLng {
@@ -105,6 +106,11 @@ export function GapList({
                   </button>
                 )}
               </div>
+              {gap.rejectReason && (
+                <p className="gap-reject-reason" role="status">
+                  {gap.rejectReason}
+                </p>
+              )}
             </li>
           )
         })}

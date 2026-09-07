@@ -138,9 +138,9 @@ function App() {
     <div className="app">
       <header className="app-header">
         <div>
-          <h1>한국 OSM 경로 지도</h1>
+          <h1>한국 경로 지도</h1>
           <p className="subtitle">
-            OpenStreetMap · 카카오/네이버 길찾기 · OSRM
+            네이버 지도 · Directions · 국토부 국도중심선 · (카카오/OSRM 폴백)
           </p>
         </div>
         <div className="app-header-controls">

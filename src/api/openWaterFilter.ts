@@ -14,6 +14,11 @@ export const POLYLINE_MAX_JUMP_M = 600
  * winding island roads stay.
  */
 export const OPEN_WATER_MIN_LENGTH_M = 380
+/**
+ * Longer than this ⇒ national-road / coastal centerline, not a ferry chord.
+ * 국도 7 northern MOLIT part is ~110 km with ratio≈1.08 — must stay.
+ */
+export const OPEN_WATER_MAX_LENGTH_M = 25_000
 /** pathLen/chord above this ⇒ sinuous enough to keep (stricter = drop more straights). */
 export const OPEN_WATER_STRAIGHTNESS_MAX = 1.08
 /** Average vertex spacing below this ⇒ dense enough to keep (bridges / land roads). */
@@ -82,6 +87,8 @@ export function looksLikeOpenWaterChord(
   if (points.length < 2) return false
   const pathLen = pathLengthMeters(points)
   if (pathLen < OPEN_WATER_MIN_LENGTH_M) return false
+  // Long centerlines (국도 corridors) are never ferry/open-water chords.
+  if (pathLen > OPEN_WATER_MAX_LENGTH_M) return false
   const start = points[0]!
   const end = points[points.length - 1]!
   const chord = haversineMeters(start, end)

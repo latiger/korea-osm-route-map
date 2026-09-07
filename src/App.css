@@ -1292,3 +1292,44 @@ button.danger-outline:hover:not(:disabled) {
   box-shadow: var(--shadow);
   pointer-events: none;
 }
+
+
+/* Naver Dynamic Map place-mode toolbar (mirrors Leaflet control) */
+.naver-map-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.naver-place-mode-control {
+  position: absolute;
+  top: 80px;
+  left: 10px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+}
+.naver-place-mode-control .place-mode-btn {
+  display: block;
+  width: 56px;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px solid #ccc;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+.naver-place-mode-control .place-mode-btn:last-child {
+  border-bottom: 0;
+}
+.naver-place-mode-control .place-mode-btn.active {
+  background: #2563eb;
+  color: #fff;
+}
+.naver-map-canvas.placing,
+.naver-map-canvas .placing {
+  cursor: crosshair;
+}

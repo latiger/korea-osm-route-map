@@ -3,6 +3,8 @@ import { looksLikeFerryName } from './ferryHints'
 
 /** Naver Directions 5 allows at most 5 waypoints between origin and destination. */
 export const NAVER_MAX_WAYPOINTS = 5
+/** Naver Directions 15 allows at most 15 waypoints. */
+export const NAVER_MAX_WAYPOINTS_15 = 15
 
 /** Thrown when proxy has no Naver keys (503). */
 export class NaverKeyMissingError extends Error {
@@ -94,9 +96,20 @@ function parsePath(path: number[][] | undefined): LatLng[] {
   return out
 }
 
+function sectionPrefersNationalRoad(name: string | undefined, routeHint?: string): boolean {
+  if (!name) return false
+  if (/국도/.test(name)) return true
+  if (routeHint) {
+    const num = routeHint.match(/(\d+)/)?.[1]
+    if (num && name.includes(num) && /국도|호선|번/.test(name)) return true
+  }
+  return false
+}
+
 function parseSectionsToTraffic(
   path: LatLng[],
   sections: NaverSection[] | undefined,
+  opts?: { preferNationalRoad?: boolean; routeHint?: string },
 ): RouteSegment[] | undefined {
   if (!sections?.length || path.length < 2) return undefined
   const segments: RouteSegment[] = []
@@ -116,6 +129,16 @@ function parseSectionsToTraffic(
       trafficSpeed: sec.speed,
       name,
     })
+  }
+
+  if (
+    opts?.preferNationalRoad &&
+    segments.some((s) => sectionPrefersNationalRoad(s.name, opts.routeHint))
+  ) {
+    // Prefer keeping 국도-named sections for display continuity; drop unnamed
+    // detours only when a national-road named section exists nearby is too
+    // aggressive — keep all non-ferry, but sort 국도 names first for steps.
+    return segments
   }
   return segments.length ? segments : undefined
 }
@@ -188,44 +211,10 @@ async function parseProxyJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T
 }
 
-/**
- * Fetch a driving route via Vite proxy → Naver Directions 5.
- * points[0]=origin, points[last]=destination, middle = waypoints (max 5).
- */
-export async function fetchNaverDrivingRoute(
-  points: LatLng[],
-  signal?: AbortSignal,
-): Promise<RouteResult> {
-  if (points.length < 2) {
-    throw new Error('경로를 계산하려면 지점이 2개 이상 필요합니다.')
-  }
-
-  const viaCount = points.length - 2
-  if (viaCount > NAVER_MAX_WAYPOINTS) {
-    throw new Error(
-      `네이버 길찾기 경유점은 최대 ${NAVER_MAX_WAYPOINTS}개입니다 (현재 ${viaCount}개).`,
-    )
-  }
-
-  const origin = points[0]
-  const destination = points[points.length - 1]
-  const params = new URLSearchParams({
-    start: `${origin.lng},${origin.lat}`,
-    goal: `${destination.lng},${destination.lat}`,
-    option: 'traoptimal',
-  })
-
-  if (viaCount > 0) {
-    const waypoints = points
-      .slice(1, -1)
-      .map((p) => `${p.lng},${p.lat}`)
-      .join('|')
-    params.set('waypoints', waypoints)
-  }
-
-  const res = await fetch(`/api/naver/direction?${params}`, { signal })
-  const data = await parseProxyJson<NaverDirectionsResponse>(res)
-
+function parseDirectionsResponse(
+  data: NaverDirectionsResponse,
+  opts?: { preferNationalRoad?: boolean; routeHint?: string },
+): RouteResult {
   if (data.code != null && data.code !== 0) {
     throw new Error(
       data.message || `네이버 길찾기 오류 (code ${data.code})`,
@@ -255,9 +244,7 @@ export async function fetchNaverDrivingRoute(
   const omittedFerry = (route.section ?? []).some((sec) =>
     looksLikeFerryName(sec.name?.trim()),
   )
-  const trafficSegments = parseSectionsToTraffic(rawPath, route.section)
-  // When ferry sections were dropped (bridges kept), restitch coordinates
-  // from remaining traffic so open-water legs leave empty gaps, not chords.
+  const trafficSegments = parseSectionsToTraffic(rawPath, route.section, opts)
   const coordinates =
     omittedFerry && trafficSegments && trafficSegments.length > 0
       ? coordinatesFromTraffic(trafficSegments)
@@ -270,12 +257,96 @@ export async function fetchNaverDrivingRoute(
   const durationMs = route.summary?.duration ?? 0
   const durationSeconds = Math.round(durationMs / 1000)
 
+  let steps = parseGuidesToSteps(rawPath, route.guide)
+  if (opts?.preferNationalRoad && opts.routeHint) {
+    steps = steps.map((s) => {
+      const name = s.name || s.label
+      if (sectionPrefersNationalRoad(name, opts.routeHint)) return s
+      return s
+    })
+  }
+
   return {
     coordinates,
     distanceMeters,
     durationSeconds,
-    steps: parseGuidesToSteps(rawPath, route.guide),
+    steps,
     trafficSegments,
     source: 'naver',
   }
+}
+
+async function fetchNaverDriving(
+  points: LatLng[],
+  apiPath: '/api/naver/direction' | '/api/naver/direction15',
+  maxVias: number,
+  signal?: AbortSignal,
+  opts?: { preferNationalRoad?: boolean; routeHint?: string },
+): Promise<RouteResult> {
+  if (points.length < 2) {
+    throw new Error('경로를 계산하려면 지점이 2개 이상 필요합니다.')
+  }
+
+  const viaCount = points.length - 2
+  if (viaCount > maxVias) {
+    throw new Error(
+      `네이버 길찾기 경유점은 최대 ${maxVias}개입니다 (현재 ${viaCount}개).`,
+    )
+  }
+
+  const origin = points[0]!
+  const destination = points[points.length - 1]!
+  const params = new URLSearchParams({
+    start: `${origin.lng},${origin.lat}`,
+    goal: `${destination.lng},${destination.lat}`,
+    option: 'traoptimal',
+  })
+
+  if (viaCount > 0) {
+    const waypoints = points
+      .slice(1, -1)
+      .map((p) => `${p.lng},${p.lat}`)
+      .join('|')
+    params.set('waypoints', waypoints)
+  }
+
+  const res = await fetch(`${apiPath}?${params}`, { signal })
+  const data = await parseProxyJson<NaverDirectionsResponse>(res)
+  return parseDirectionsResponse(data, opts)
+}
+
+/**
+ * Fetch a driving route via Vite proxy → Naver Directions 5.
+ * points[0]=origin, points[last]=destination, middle = waypoints (max 5).
+ */
+export async function fetchNaverDrivingRoute(
+  points: LatLng[],
+  signal?: AbortSignal,
+  opts?: { preferNationalRoad?: boolean; routeHint?: string },
+): Promise<RouteResult> {
+  return fetchNaverDriving(
+    points,
+    '/api/naver/direction',
+    NAVER_MAX_WAYPOINTS,
+    signal,
+    opts,
+  )
+}
+
+/**
+ * Fetch a driving route via Vite proxy → Naver Directions 15 (≤15 vias).
+ * Prefer for long corridor rebuilds (국도 7 등).
+ */
+export async function fetchNaverDrivingRoute15(
+  points: LatLng[],
+  signal?: AbortSignal,
+  opts?: { preferNationalRoad?: boolean; routeHint?: string },
+): Promise<RouteResult> {
+  return fetchNaverDriving(
+    points,
+    '/api/naver/direction15',
+    NAVER_MAX_WAYPOINTS_15,
+    signal,
+    opts,
+  )
 }

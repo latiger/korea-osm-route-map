@@ -19,6 +19,9 @@ import {
   STEP_MARKER_MAX_DIST_M,
 } from '../api/openWaterFilter'
 import type { LatLng, MapFocus, PlaceMode, RouteSegment } from '../types'
+import type { MapCanvasProps } from './mapCanvasTypes'
+import { getNaverMapClientId, isNaverMapsReady, NaverMapCanvas } from './NaverMapCanvas'
+export type { MapCanvasProps } from './mapCanvasTypes'
 
 export const SEOUL_CENTER: LatLng = { lat: 37.5665, lng: 126.978 }
 export const DEFAULT_ZOOM = 12
@@ -375,37 +378,7 @@ function PlaceModeControl({
   return null
 }
 
-export interface MapCanvasProps {
-  markers?: Array<LatLng & { key: string; label?: string }>
-  /** Single polyline (OSRM / fallback) */
-  route?: LatLng[]
-  /**
-   * Official MultiLineString roads: draw each entry as its own Polyline.
-   * When present and non-empty, drawn as blue polylines (alongside trafficSegments).
-   */
-  routeLineStrings?: LatLng[][]
-  /**
-   * Gap bridges between official MultiLineString parts.
-   * Only routed (>2 pts) connectors are drawn; 2-point straights stay in GapList.
-   */
-  connectorLineStrings?: LatLng[][]
-  /** Kakao traffic-colored road segments (preferred when present) */
-  trafficSegments?: RouteSegment[]
-  /** When set, map clicks place OD points (keep armed until toggled off) */
-  placeMode?: PlaceMode | null
-  onPlaceModeChange?: (mode: PlaceMode | null) => void
-  /** Show place-mode toolbar (od mode only) */
-  showPlaceControls?: boolean
-  onMapPlace?: (role: PlaceMode, ll: LatLng) => void
-  /** Pan/zoom target from route-step or gap-list click */
-  focus?: MapFocus | null
-  /** Bump to re-run FitBounds (restore full-route view) */
-  fitRevision?: number
-  /** Numbered route-step markers matching RouteSummary list indices */
-  stepMarkers?: Array<{ n: number; lat: number; lng: number; label?: string }>
-}
-
-export function MapCanvas({
+export function LeafletMapCanvas({
   markers = [],
   route = [],
   routeLineStrings,
@@ -627,4 +600,33 @@ export function MapCanvas({
       ))}
     </MapContainer>
   )
+}
+
+
+/** Primary: Naver Dynamic Map when JS + client id available; else Leaflet/OSM. */
+export function MapCanvas(props: MapCanvasProps) {
+  const [useNaver, setUseNaver] = useState(false)
+
+  useEffect(() => {
+    const id = getNaverMapClientId()
+    if (id && isNaverMapsReady()) {
+      setUseNaver(true)
+      return
+    }
+    // Script may still be loading from index.html inject
+    let tries = 0
+    const t = window.setInterval(() => {
+      tries++
+      if (getNaverMapClientId() && isNaverMapsReady()) {
+        setUseNaver(true)
+        window.clearInterval(t)
+      } else if (tries > 40) {
+        window.clearInterval(t)
+      }
+    }, 100)
+    return () => window.clearInterval(t)
+  }, [])
+
+  if (useNaver) return <NaverMapCanvas {...props} />
+  return <LeafletMapCanvas {...props} />
 }

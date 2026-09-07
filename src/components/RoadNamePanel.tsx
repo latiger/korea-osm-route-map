@@ -710,7 +710,7 @@ export function RoadNamePanel({
           if (molit.length > 0) {
             setMatches(molit)
             setDataNote(
-              '국토교통부 일반국도 도로중심선으로 노선을 찾은 뒤, 선택한 길찾기(카카오/네이버)로 실제 주행 경로를 다시 그립니다.',
+              '국토교통부 일반국도 도로중심선으로 노선을 찾은 뒤, 네이버 Directions로 실제 주행 경로를 다시 그립니다.',
             )
             if (molit.length === 1 && chainWasEmpty) {
               await applyChain([molit[0]])
@@ -991,11 +991,10 @@ export function RoadNamePanel({
       )}
       <RouteSummary route={route} onStepClick={onFocusLocation} />
       <p className="hint muted">
-        국도(예: 2번국도)는 국토교통부 일반국도 도로중심선으로 노선을 찾은 뒤
-        카카오/네이버 자동차 길찾기로 실제 주행 경로를 재구성합니다. 고속도로는
-        EX 노선 목록 + OSM geometry 기준으로 동일하게 재구성합니다. 도보 모드에서는
-        공식 중심선을 그대로 그립니다. 헤더·패널의 길찾기 제공자(카카오/네이버/자동)로
-        API를 바꿀 수 있습니다.
+        기본 길찾기는 네이버 Directions입니다. 국도(예: 7번국도)는 국토교통부
+        일반국도 도로중심선으로 노선을 찾은 뒤 네이버(Directions 15)로 실제 주행
+        경로를 재구성합니다. 고속도로는 EX 노선 목록 + OSM geometry 기준으로
+        동일하게 재구성합니다. 카카오/OSRM은 폴백으로 사용할 수 있습니다.
       </p>
     </div>
   )

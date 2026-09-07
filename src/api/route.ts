@@ -2,7 +2,9 @@ import { KakaoKeyMissingError } from './kakao'
 import { fetchKakaoDrivingRoute, KAKAO_MAX_WAYPOINTS } from './kakaoNavi'
 import {
   fetchNaverDrivingRoute,
+  fetchNaverDrivingRoute15,
   NAVER_MAX_WAYPOINTS,
+  NAVER_MAX_WAYPOINTS_15,
   NaverKeyMissingError,
 } from './naverNavi'
 import { fetchRoute as fetchOsrmRoute } from './osrm'
@@ -21,7 +23,7 @@ export {
 } from './osrm'
 
 export { trafficStateColor, TRAFFIC_COLORS, KAKAO_MAX_WAYPOINTS } from './kakaoNavi'
-export { NAVER_MAX_WAYPOINTS, NaverKeyMissingError } from './naverNavi'
+export { NAVER_MAX_WAYPOINTS, NAVER_MAX_WAYPOINTS_15, NaverKeyMissingError, fetchNaverDrivingRoute15 } from './naverNavi'
 
 export type { RoutingProvider }
 
@@ -34,7 +36,7 @@ export function loadStoredProvider(): RoutingProvider {
   } catch {
     /* ignore */
   }
-  return 'auto'
+  return 'naver'
 }
 
 export function storeProvider(p: RoutingProvider): void {
@@ -92,13 +94,18 @@ async function tryNaver(
   signal?: AbortSignal,
 ): Promise<{ route?: RouteResult; hint?: string }> {
   const viaCount = Math.max(0, points.length - 2)
-  if (viaCount > NAVER_MAX_WAYPOINTS) {
-    return { hint: `네이버 경유지 ${NAVER_MAX_WAYPOINTS}개 초과 → 폴백` }
+  if (viaCount > NAVER_MAX_WAYPOINTS_15) {
+    return { hint: `네이버 경유지 ${NAVER_MAX_WAYPOINTS_15}개 초과 → 폴백` }
   }
   try {
+    if (viaCount > NAVER_MAX_WAYPOINTS) {
+      return { route: await fetchNaverDrivingRoute15(points, signal) }
+    }
     return { route: await fetchNaverDrivingRoute(points, signal) }
   } catch (e) {
     if ((e as Error).name === 'AbortError') throw e
+    // Directions 5 path may fail for mid-size via counts already handled above;
+    // if Directions 15 fails, surface hint for OSRM fallback.
     const c = classifyProviderError(e)
     if (!(e instanceof NaverKeyMissingError)) {
       console.warn('[route] Naver Directions failed:', e)
@@ -124,8 +131,8 @@ async function osrmFallback(
  * Routing facade:
  * - walking → OSRM only
  * - driving kakao → Kakao then OSRM
- * - driving naver → Naver then OSRM
- * - driving auto → Kakao then Naver then OSRM
+ * - driving naver → Naver (5/15) then OSRM
+ * - driving auto → Naver then Kakao then OSRM
  */
 export async function fetchRoute(
   points: LatLng[],
@@ -154,19 +161,19 @@ export async function fetchRoute(
     return osrmFallback(points, signal, hints.join(' · ') || undefined)
   }
 
-  // auto: Kakao → Naver → OSRM
-  const k = await tryKakao(points, signal)
-  if (k.route) return k.route
-  if (k.hint) hints.push(k.hint)
-
+  // auto: Naver → Kakao → OSRM (Naver-primary)
   const n = await tryNaver(points, signal)
-  if (n.route) {
+  if (n.route) return n.route
+  if (n.hint) hints.push(n.hint)
+
+  const k = await tryKakao(points, signal)
+  if (k.route) {
     return {
-      ...n.route,
+      ...k.route,
       fallbackNote: hints.length ? hints.join(' · ') : undefined,
     }
   }
-  if (n.hint) hints.push(n.hint)
+  if (k.hint) hints.push(k.hint)
 
   return osrmFallback(points, signal, hints.join(' · ') || undefined)
 }

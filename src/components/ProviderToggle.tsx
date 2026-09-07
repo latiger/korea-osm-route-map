@@ -7,8 +7,8 @@ interface Props {
 }
 
 const OPTIONS: Array<{ id: RoutingProvider; label: string }> = [
-  { id: 'kakao', label: '카카오' },
   { id: 'naver', label: '네이버' },
+  { id: 'kakao', label: '카카오' },
   { id: 'auto', label: '자동' },
 ]
 

@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import {
-  geocodeKoreaPreferKakao as geocodeKorea,
+  geocodeKoreaPreferNaver as geocodeKorea,
 } from '../api/geocode'
 import { fetchRoute } from '../api/route'
 import type {

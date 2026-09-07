@@ -10,9 +10,11 @@ import {
 } from './openWaterFilter'
 import {
   FERRY_ISLAND_EXCLUDED_HINT,
+  TRUNCATED_CORRIDOR_HINT,
   selectCarDrivableComponent,
 } from './carDrivable'
-import { fetchRoute } from './route'
+import { fetchRoute, NAVER_MAX_WAYPOINTS_15 } from './route'
+import { fetchNaverDrivingRoute15 } from './naverNavi'
 import type {
   LatLng,
   RoadMatch,
@@ -22,14 +24,20 @@ import type {
   RoutingProvider,
 } from '../types'
 
-/** Max vias per Kakao/Naver Directions call. */
+/** Max vias per Kakao / Naver Directions 5 call. */
 const MAX_VIAS = 5
-/** Points per API call = start + vias + end */
+/** Points per Directions-5 call = start + vias + end */
 const POINTS_PER_CALL = MAX_VIAS + 2
+/** Points per Naver Directions-15 call = start + ≤15 vias + end */
+const POINTS_PER_CALL_15 = NAVER_MAX_WAYPOINTS_15 + 2
 /** Sample guide points roughly every N meters along official centerline. */
 const SAMPLE_EVERY_M = 12_000
+/** Denser sampling when stitching with Naver Directions 15. */
+const SAMPLE_EVERY_M_NAVER = 8_000
 /** Soft cap on samples so very long roads do not explode API call count. */
 const MAX_SAMPLES = 80
+/** Higher sample cap for Naver 15 long-corridor rebuilds (국도 7 등). */
+const MAX_SAMPLES_NAVER = 120
 /** Fill chunk-join holes when adjacent part endpoints are farther than this. */
 const CHUNK_JOIN_GAP_M = 5
 /** Densify traffic: real mini-route when consecutive segment tips exceed this. */
@@ -131,14 +139,18 @@ export function sampleAlongPath(
  * Split samples into overlapping windows of ≤ POINTS_PER_CALL points
  * (start + ≤5 vias + end). Windows share the endpoint so stitch is seamless.
  */
-export function chunkSamplesForDriving(samples: LatLng[]): LatLng[][] {
+export function chunkSamplesForDriving(
+  samples: LatLng[],
+  pointsPerCall: number = POINTS_PER_CALL,
+): LatLng[][] {
   if (samples.length < 2) return []
-  if (samples.length <= POINTS_PER_CALL) return [samples]
+  const ppc = Math.max(2, pointsPerCall)
+  if (samples.length <= ppc) return [samples]
 
   const chunks: LatLng[][] = []
   let i = 0
   while (i < samples.length - 1) {
-    const endIdx = Math.min(i + POINTS_PER_CALL - 1, samples.length - 1)
+    const endIdx = Math.min(i + ppc - 1, samples.length - 1)
     chunks.push(samples.slice(i, endIdx + 1))
     if (endIdx === samples.length - 1) break
     i = endIdx // overlap at shared endpoint
@@ -472,21 +484,46 @@ export async function rebuildOfficialAsDriving(
   const flat = flattenOrderedLines(ordered)
   if (flat.length < 2) return null
 
-  const samples = sampleAlongPath(flat)
-  const chunks = chunkSamplesForDriving(samples)
+  const useNaver15 = provider === 'naver' || provider === 'auto'
+  const samples = sampleAlongPath(
+    flat,
+    useNaver15 ? SAMPLE_EVERY_M_NAVER : SAMPLE_EVERY_M,
+    useNaver15 ? MAX_SAMPLES_NAVER : MAX_SAMPLES,
+  )
+  const chunks = chunkSamplesForDriving(
+    samples,
+    useNaver15 ? POINTS_PER_CALL_15 : POINTS_PER_CALL,
+  )
   if (!chunks.length) return null
 
+  const roadName = match.name
+  const preferNational = /국도/.test(roadName)
   const parts: RouteResult[] = []
   for (const chunk of chunks) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     if (chunk.length < 2) continue
+    if (useNaver15) {
+      try {
+        const part = await fetchNaverDrivingRoute15(chunk, signal, {
+          preferNationalRoad: preferNational,
+          routeHint: roadName,
+        })
+        parts.push(part)
+        continue
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') throw e
+        // Fall through to provider facade (Kakao/Naver5/OSRM).
+        console.warn('[drivingRebuild] Naver Directions 15 failed, facade fallback:', e)
+      }
+    }
     const part = await fetchRoute(chunk, 'driving', signal, provider)
     parts.push(part)
   }
 
   if (!parts.length) return null
 
-  const stitched = await stitchDrivingResults(parts, provider, signal)
+  const stitchProvider: RoutingProvider = useNaver15 ? 'naver' : provider
+  const stitched = await stitchDrivingResults(parts, stitchProvider, signal)
   // Gaps only within the car-drivable component (omit pure ferry-island hops).
   const { gaps: rawGaps, connectorLineStrings } = listOfficialSegmentGaps(ordered)
   const gaps = rawGaps.map((g) => ({
@@ -495,20 +532,34 @@ export async function rebuildOfficialAsDriving(
     label: `${match.name} 내부`,
   }))
 
-  // Keep a light road-name prefix on steps for multi-road chains
-  const roadName = match.name
   // Official land underlay from the car-drivable component only.
   const landUnderlay = officialLandUnderlay(ordered)
   const ferryHint = car.droppedFerryIslands ? FERRY_ISLAND_EXCLUDED_HINT : undefined
-  const fallbackNote = [stitched.fallbackNote, ferryHint].filter(Boolean).join(' · ') || undefined
+  const truncHint = car.truncatedCorridor ? TRUNCATED_CORRIDOR_HINT : undefined
+  const fallbackNote =
+    [stitched.fallbackNote, ferryHint, truncHint].filter(Boolean).join(' · ') ||
+    undefined
+
+  // Prefer display steps whose name mentions 국도 / route number when present.
+  const steps = stitched.steps.map((s) => {
+    const name = s.name || roadName
+    const keepNational =
+      preferNational &&
+      ( /국도/.test(name) ||
+        (roadName.match(/(\d+)/)?.[1]
+          ? name.includes(roadName.match(/(\d+)/)![1]!)
+          : false))
+    return {
+      ...s,
+      name: keepNational ? name : s.name || roadName,
+      label: s.label.startsWith(roadName) ? s.label : s.label,
+    }
+  })
+
   return {
     ...stitched,
     lineStrings: landUnderlay.length ? landUnderlay : undefined,
-    steps: stitched.steps.map((s) => ({
-      ...s,
-      name: s.name || roadName,
-      label: s.label.startsWith(roadName) ? s.label : s.label,
-    })),
+    steps,
     gaps: gaps.length ? gaps : undefined,
     connectorLineStrings: connectorLineStrings.length
       ? connectorLineStrings

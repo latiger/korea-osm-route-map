@@ -1,4 +1,8 @@
-import { looksLikeOpenWaterChord, haversineMeters, pathLengthMeters } from './openWaterFilter'
+import {
+  looksLikeOpenWaterChord,
+  haversineMeters,
+  pathLengthMeters,
+} from './openWaterFilter'
 import type { LatLng } from '../types'
 
 /**
@@ -8,11 +12,21 @@ import type { LatLng } from '../types'
 export const CAR_HARD_JOIN_M = 120
 
 /**
- * Soft join for land / short bridge gaps between MultiLineString parts.
- * Must clear the largest mainland MOLIT tip gaps on 국도 2 (~5.2 km) while
- * staying below typical ferry-only island hops (~8+ km).
+ * Near soft join for land / short bridge gaps between MultiLineString parts.
+ * Clears mainland MOLIT tip gaps on 국도 2 (~5.2 km) and 국도 7 mid-coast
+ * holes (~7 km) while staying under many ferry-only island hops (~10+ km).
  */
-export const CAR_SOFT_JOIN_M = 6500
+export const CAR_SOFT_JOIN_M = 10_000
+
+/**
+ * Extended soft join for larger mainland national-road MOLIT holes only.
+ * Applied only when tip-to-tip looks like a land corridor gap (not an
+ * open-water / ferry island hop). Typical band 15–25 km.
+ */
+export const CAR_SOFT_JOIN_LAND_M = 20_000
+
+/** Prefer-end component shorter than this fraction of longest → prefer longer corridor. */
+const SHORT_END_COMPONENT_RATIO = 0.55
 
 /** Declared end/start snaps into a component within this distance. */
 const END_IN_COMPONENT_M = 5_000
@@ -28,21 +42,73 @@ export interface CarDrivableSelection {
   excludedPartCount: number
   /** True when at least one part was dropped as non-car-drivable. */
   droppedFerryIslands: boolean
+  /**
+   * True when the chosen car path still looks truncated vs declared start/end
+   * (e.g. missing Gangwon or Busan tip after component selection).
+   */
+  truncatedCorridor: boolean
 }
 
 function segmentTips(line: LatLng[]): [LatLng, LatLng] {
   return [line[0]!, line[line.length - 1]!]
 }
 
-function minTipDistance(a: LatLng[], b: LatLng[]): number {
+function nearestTipPair(
+  a: LatLng[],
+  b: LatLng[],
+): { dist: number; tipA: LatLng; tipB: LatLng } {
   const [a0, a1] = segmentTips(a)
   const [b0, b1] = segmentTips(b)
-  return Math.min(
-    haversineMeters(a0, b0),
-    haversineMeters(a0, b1),
-    haversineMeters(a1, b0),
-    haversineMeters(a1, b1),
-  )
+  let dist = Infinity
+  let tipA = a0
+  let tipB = b0
+  for (const x of [a0, a1]) {
+    for (const y of [b0, b1]) {
+      const d = haversineMeters(x, y)
+      if (d < dist) {
+        dist = d
+        tipA = x
+        tipB = y
+      }
+    }
+  }
+  return { dist, tipA, tipB }
+}
+
+function minTipDistance(a: LatLng[], b: LatLng[]): number {
+  return nearestTipPair(a, b).dist
+}
+
+/**
+ * Extended soft-join gate: allow 10–20 km tip joins only for mainland MOLIT
+ * holes, not ferry-island hops. Tip-to-tip open-water chords / ferry-only
+ * hops are refused (no bridge cue on a bare tip chord).
+ */
+function canSoftJoinLandTips(a: LatLng[], b: LatLng[], dist: number): boolean {
+  if (dist <= CAR_HARD_JOIN_M) return true
+  if (dist <= CAR_SOFT_JOIN_M) return true
+  if (dist > CAR_SOFT_JOIN_LAND_M) return false
+
+  const { tipA, tipB } = nearestTipPair(a, b)
+  // Bare tip–tip chord over empty space: refuse when it looks like open water
+  // (straight sparse hop) — ferry islands without bridge cues stay separate.
+  if (looksLikeOpenWaterChord([tipA, tipB])) {
+    // Mainland MOLIT holes also look like 2-point straight chords. Allow only
+    // when a part bends toward the gap (interior vertex near midpoint) so the
+    // corridor is land-adjacent rather than a clean water hop.
+    const mid: LatLng = {
+      lat: (tipA.lat + tipB.lat) / 2,
+      lng: (tipA.lng + tipB.lng) / 2,
+    }
+    const thr = Math.min(3_500, dist * 0.35)
+    for (const line of [a, b]) {
+      for (let i = 1; i < line.length - 1; i++) {
+        if (haversineMeters(mid, line[i]!) <= thr) return true
+      }
+    }
+    return false
+  }
+  return true
 }
 
 function findRoot(parent: number[], i: number): number {
@@ -154,15 +220,88 @@ function orderComponent(lines: LatLng[][], startHint: LatLng): LatLng[][] {
   return ordered
 }
 
+type Comp = { lines: LatLng[][]; length: number }
+
+/**
+ * Choose car-drivable component: preferEnd when it yields a full corridor;
+ * if that component is much shorter than the longest, prefer the component
+ * that also contains preferStart (or the longest) so 국도 7 keeps Gangwon.
+ */
+function chooseComponent(
+  ranked: Comp[],
+  preferEnd?: LatLng,
+  preferStart?: LatLng,
+): Comp {
+  const longest = ranked[0]!
+  if (!ranked.length) return longest
+
+  const withEnd =
+    preferEnd && Number.isFinite(preferEnd.lat) && Number.isFinite(preferEnd.lng)
+      ? ranked.find((c) => pointInLines(preferEnd, c.lines, END_IN_COMPONENT_M))
+      : undefined
+  const withStart =
+    preferStart &&
+    Number.isFinite(preferStart.lat) &&
+    Number.isFinite(preferStart.lng)
+      ? ranked.find((c) =>
+          pointInLines(preferStart, c.lines, END_IN_COMPONENT_M),
+        )
+      : undefined
+  const withBoth =
+    preferEnd && preferStart
+      ? ranked.find(
+          (c) =>
+            pointInLines(preferEnd, c.lines, END_IN_COMPONENT_M) &&
+            pointInLines(preferStart, c.lines, END_IN_COMPONENT_M),
+        )
+      : undefined
+
+  if (withBoth) return withBoth
+
+  if (withEnd) {
+    const endShort =
+      longest.length > 0 &&
+      withEnd.length < longest.length * SHORT_END_COMPONENT_RATIO
+    if (endShort) {
+      // Truncated southern stub (국도 7 ≈Busan): prefer start-containing or longest.
+      if (withStart && withStart.length > withEnd.length) return withStart
+      return longest
+    }
+    return withEnd
+  }
+
+  if (withStart && withStart.length >= longest.length * SHORT_END_COMPONENT_RATIO) {
+    return withStart
+  }
+  return longest
+}
+
+function corridorLooksTruncated(
+  lines: LatLng[][],
+  preferStart?: LatLng,
+  preferEnd?: LatLng,
+): boolean {
+  if (!lines.length) return false
+  const missStart =
+    preferStart &&
+    Number.isFinite(preferStart.lat) &&
+    !pointInLines(preferStart, lines, END_IN_COMPONENT_M)
+  const missEnd =
+    preferEnd &&
+    Number.isFinite(preferEnd.lat) &&
+    !pointInLines(preferEnd, lines, END_IN_COMPONENT_M)
+  return Boolean(missStart || missEnd)
+}
+
 /**
  * Keep only the car-drivable contiguous MultiLineString component
  * (mainland + bridge-linked islands). Ferry-only island chains and
  * open-water chord parts are excluded.
  *
- * Connectivity: join tips within CAR_HARD_JOIN_M always; also soft-join up to
- * CAR_SOFT_JOIN_M for land/bridge MOLIT gaps. Do not join farther (ferry hops).
- * Open-water chord segments are never nodes in the graph.
- * Prefer the component that contains `preferEnd`; else the longest by length.
+ * Connectivity: join tips within CAR_HARD_JOIN_M always; soft-join up to
+ * CAR_SOFT_JOIN_M for land/bridge MOLIT gaps; extended soft-join up to
+ * CAR_SOFT_JOIN_LAND_M only for non-open-water land tips (mainland holes).
+ * Prefer full start↔end corridor; avoid short preferEnd-only stubs.
  */
 export function selectCarDrivableComponent(
   parts: LatLng[][],
@@ -177,6 +316,7 @@ export function selectCarDrivableComponent(
       end: preferEnd ?? { lat: 0, lng: 0 },
       excludedPartCount: parts.length,
       droppedFerryIslands: parts.length > 0,
+      truncatedCorridor: false,
     }
   }
 
@@ -202,6 +342,11 @@ export function selectCarDrivableComponent(
       end,
       excludedPartCount: usable.length - 1 + (parts.length - usable.length),
       droppedFerryIslands: true,
+      truncatedCorridor: corridorLooksTruncated(
+        [longest],
+        preferStart,
+        preferEnd,
+      ),
     }
   }
 
@@ -209,13 +354,13 @@ export function selectCarDrivableComponent(
   for (let i = 0; i < land.length; i++) {
     for (let j = i + 1; j < land.length; j++) {
       const dist = minTipDistance(land[i]!, land[j]!)
-      if (dist <= CAR_HARD_JOIN_M || dist <= CAR_SOFT_JOIN_M) {
+      if (dist <= CAR_HARD_JOIN_M || canSoftJoinLandTips(land[i]!, land[j]!, dist)) {
         union(parent, i, j)
       }
     }
   }
 
-  const comps = new Map<number, { lines: LatLng[][]; length: number }>()
+  const comps = new Map<number, Comp>()
   for (let i = 0; i < land.length; i++) {
     const root = findRoot(parent, i)
     let c = comps.get(root)
@@ -228,14 +373,7 @@ export function selectCarDrivableComponent(
   }
 
   const ranked = [...comps.values()].sort((a, b) => b.length - a.length)
-
-  let chosen = ranked[0]!
-  if (preferEnd && Number.isFinite(preferEnd.lat) && Number.isFinite(preferEnd.lng)) {
-    const withEnd = ranked.find((c) =>
-      pointInLines(preferEnd, c.lines, END_IN_COMPONENT_M),
-    )
-    if (withEnd) chosen = withEnd
-  }
+  const chosen = chooseComponent(ranked, preferEnd, preferStart)
 
   const excludedPartCount =
     usable.length - chosen.lines.length + (parts.length - usable.length)
@@ -262,9 +400,14 @@ export function selectCarDrivableComponent(
     end,
     excludedPartCount,
     droppedFerryIslands: droppedFerryIslands && excludedPartCount > 0,
+    truncatedCorridor: corridorLooksTruncated(ordered, preferStart, preferEnd),
   }
 }
 
 /** Korean status when ferry-only island / open-water parts were dropped. */
 export const FERRY_ISLAND_EXCLUDED_HINT =
   '차량 진입 불가(섬·페리) 구간 제외'
+
+/** Korean status when car-drivable selection still misses declared start/end. */
+export const TRUNCATED_CORRIDOR_HINT =
+  '일부 구간이 차량 경로에서 제외되어 노선이 짧게 표시될 수 있습니다'

@@ -362,21 +362,39 @@ function exProxyPlugin(apiKey: string): Plugin {
 
 
 /**
- * Dev proxy for Naver Cloud Platform Directions 5 (자동차 길찾기).
+ * Dev proxy for Naver Cloud Platform Maps APIs.
  *
- * - /api/naver/direction → maps.apigw.ntruss.com/map-direction/v1/driving
- *   (fallback: naveropenapi.apigw.ntruss.com)
+ * - /api/naver/direction → map-direction/v1/driving (Directions 5, ≤5 vias)
+ * - /api/naver/direction15 → map-direction-15/v1/driving (Directions 15, ≤15 vias)
+ * - /api/naver/geocode → map-geocode/v2/geocode
+ * - /api/naver/reversegeocode → map-reversegeocode/v2/gc
+ * - /api/naver/map-client-id → public Client ID only (for Dynamic Map JS)
  *
  * Injects X-NCP-APIGW-API-KEY-ID / X-NCP-APIGW-API-KEY from server env only.
  * Without keys, responds 503 so the client can fall back.
  */
 function naverProxyPlugin(clientId: string, clientSecret: string): Plugin {
-  const UPSTREAMS = [
-    'https://maps.apigw.ntruss.com/map-direction/v1/driving',
-    'https://naveropenapi.apigw.ntruss.com/map-direction/v1/driving',
-  ]
+  type UpstreamPair = { primary: string; fallback: string }
+
+  const DIRECTION5: UpstreamPair = {
+    primary: 'https://maps.apigw.ntruss.com/map-direction/v1/driving',
+    fallback: 'https://naveropenapi.apigw.ntruss.com/map-direction/v1/driving',
+  }
+  const DIRECTION15: UpstreamPair = {
+    primary: 'https://maps.apigw.ntruss.com/map-direction-15/v1/driving',
+    fallback: 'https://naveropenapi.apigw.ntruss.com/map-direction-15/v1/driving',
+  }
+  const GEOCODE: UpstreamPair = {
+    primary: 'https://maps.apigw.ntruss.com/map-geocode/v2/geocode',
+    fallback: 'https://naveropenapi.apigw.ntruss.com/map-geocode/v2/geocode',
+  }
+  const REVERSE: UpstreamPair = {
+    primary: 'https://maps.apigw.ntruss.com/map-reversegeocode/v2/gc',
+    fallback: 'https://naveropenapi.apigw.ntruss.com/map-reversegeocode/v2/gc',
+  }
 
   async function proxyNaver(
+    pair: UpstreamPair,
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> {
@@ -395,6 +413,7 @@ function naverProxyPlugin(clientId: string, clientSecret: string): Plugin {
 
     const incoming = new URL(req.url ?? '/', 'http://localhost')
     const query = incoming.searchParams.toString()
+    const UPSTREAMS = [pair.primary, pair.fallback]
 
     let lastError: unknown = null
     for (const base of UPSTREAMS) {
@@ -409,7 +428,6 @@ function naverProxyPlugin(clientId: string, clientSecret: string): Plugin {
           },
         })
         const body = await upstream.text()
-        // Try fallback host on hard upstream failures (5xx / network already caught)
         if (upstream.status >= 500 && base !== UPSTREAMS[UPSTREAMS.length - 1]) {
           lastError = new Error(`upstream ${upstream.status}`)
           continue
@@ -433,18 +451,52 @@ function naverProxyPlugin(clientId: string, clientSecret: string): Plugin {
     res.end(
       JSON.stringify({
         error: 'naver_upstream_failed',
-        message: (lastError as Error)?.message ?? '네이버 Directions 요청 실패',
+        message: (lastError as Error)?.message ?? '네이버 Maps 요청 실패',
       }),
     )
   }
 
   return {
     name: 'naver-proxy',
+    transformIndexHtml(html) {
+      // Client ID is public (Maps JS); secret stays server-only.
+      if (!clientId) return html
+      const tag = `<script type="text/javascript" src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${encodeURIComponent(clientId)}"></script>`
+      if (html.includes('oapi.map.naver.com/openapi/v3/maps.js')) return html
+      return html.replace('</head>', `    ${tag}\n  </head>`)
+    },
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const url = req.url ?? ''
+        if (url.startsWith('/api/naver/map-client-id')) {
+          res.statusCode = clientId ? 200 : 503
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.end(
+            JSON.stringify(
+              clientId
+                ? { clientId }
+                : {
+                    error: 'NAVER_MAP_KEYS_MISSING',
+                    message: '네이버 지도 Client ID가 없습니다.',
+                  },
+            ),
+          )
+          return
+        }
+        if (url.startsWith('/api/naver/direction15')) {
+          void proxyNaver(DIRECTION15, req, res)
+          return
+        }
         if (url.startsWith('/api/naver/direction')) {
-          void proxyNaver(req, res)
+          void proxyNaver(DIRECTION5, req, res)
+          return
+        }
+        if (url.startsWith('/api/naver/geocode')) {
+          void proxyNaver(GEOCODE, req, res)
+          return
+        }
+        if (url.startsWith('/api/naver/reversegeocode')) {
+          void proxyNaver(REVERSE, req, res)
           return
         }
         next()
@@ -468,6 +520,10 @@ export default defineConfig(({ mode }) => {
   const naverClientSecret = env.NAVER_MAP_CLIENT_SECRET?.trim() || ''
 
   return {
+    define: {
+      // Public Maps JS client id (same as NAVER_MAP_CLIENT_ID); secret stays server-only.
+      __NAVER_MAP_CLIENT_ID__: JSON.stringify(naverClientId),
+    },
     plugins: [
       react(),
       kakaoProxyPlugin(kakaoKey),

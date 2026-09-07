@@ -114,6 +114,7 @@ async function materializeRoad(
             start,
             end,
             lineStrings: lineStringsFromRoute(rebuilt),
+            connectorLineStrings: rebuilt.connectorLineStrings,
             official: false,
           }
         }

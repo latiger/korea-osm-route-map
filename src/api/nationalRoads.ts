@@ -408,6 +408,42 @@ function makeGapInfo(
 }
 
 /**
+ * Geometry-only gap listing between ordered official segments.
+ * No routing API calls — mid-size gaps are `straight` (dashed connectors);
+ * long gaps (> GAP_ROUTE_MAX_M) are `skipped`. Used after driving rebuild
+ * so GapList can show official discontinuities without a second Kakao pass.
+ */
+export function listOfficialSegmentGaps(
+  ordered: LatLng[][],
+  labelPrefix = '내부 끊김',
+): {
+  gaps: RouteGapInfo[]
+  connectorLineStrings: LatLng[][]
+} {
+  const gaps: RouteGapInfo[] = []
+  const connectorLineStrings: LatLng[][] = []
+
+  for (let i = 1; i < ordered.length; i++) {
+    const prev = ordered[i - 1]
+    const next = ordered[i]
+    if (prev.length < 2 || next.length < 2) continue
+    const a = prev[prev.length - 1]
+    const b = next[0]
+    const gapMeters = haversineMeters(a, b)
+    if (gapMeters <= GAP_IGNORE_M) continue
+
+    if (gapMeters > GAP_ROUTE_MAX_M) {
+      gaps.push(makeGapInfo(i, a, b, gapMeters, 'skipped', labelPrefix))
+    } else {
+      gaps.push(makeGapInfo(i, a, b, gapMeters, 'straight', labelPrefix))
+      connectorLineStrings.push([a, b])
+    }
+  }
+
+  return { gaps, connectorLineStrings }
+}
+
+/**
  * Between consecutive oriented segments:
  * - ≤ ~90m: ignore
  * - 90m … 5km: prefer Kakao/OSRM via fetchRoute (capped, shortest-first)

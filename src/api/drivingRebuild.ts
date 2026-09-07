@@ -1,4 +1,8 @@
-import { clipPathToDeclaredEnds, orderAndOrientSegments } from './nationalRoads'
+import {
+  clipOrderedSegmentsToDeclaredEnds,
+  listOfficialSegmentGaps,
+  orderAndOrientSegments,
+} from './nationalRoads'
 import { fetchRoute } from './route'
 import type {
   LatLng,
@@ -230,12 +234,13 @@ export async function rebuildOfficialAsDriving(
     (match.geometry && match.geometry.length >= 2 ? [match.geometry] : [])
   if (!raw.length) return null
 
-  const ordered = orderAndOrientSegments(raw, match.start)
-  const flat = clipPathToDeclaredEnds(
-    flattenOrderedLines(ordered),
+  // Preserve segment boundaries for official gap listing (same as official path).
+  const ordered = clipOrderedSegmentsToDeclaredEnds(
+    orderAndOrientSegments(raw, match.start),
     match.start,
     match.end,
   )
+  const flat = flattenOrderedLines(ordered)
   if (flat.length < 2) return null
 
   const samples = sampleAlongPath(flat)
@@ -253,6 +258,14 @@ export async function rebuildOfficialAsDriving(
   if (!parts.length) return null
 
   const stitched = stitchDrivingResults(parts)
+  // Geometry-only official gaps (no second Kakao pass) so GapList still works.
+  const { gaps: rawGaps, connectorLineStrings } = listOfficialSegmentGaps(ordered)
+  const gaps = rawGaps.map((g) => ({
+    ...g,
+    id: `${match.id}-${g.id}`,
+    label: `${match.name} 내부`,
+  }))
+
   // Keep a light road-name prefix on steps for multi-road chains
   const roadName = match.name
   return {
@@ -262,5 +275,9 @@ export async function rebuildOfficialAsDriving(
       name: s.name || roadName,
       label: s.label.startsWith(roadName) ? s.label : s.label,
     })),
+    gaps: gaps.length ? gaps : undefined,
+    connectorLineStrings: connectorLineStrings.length
+      ? connectorLineStrings
+      : undefined,
   }
 }

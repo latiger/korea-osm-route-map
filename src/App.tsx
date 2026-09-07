@@ -167,12 +167,13 @@ function App() {
 
         <main className="map-wrap">
           {mapBusy && (
-            <div className="map-loading-overlay" aria-busy="true">
-              <div
-                className="map-loading-bar"
-                role="progressbar"
-                aria-label="경로 불러오는 중"
-              />
+            <div
+              className="map-loading-overlay"
+              aria-busy="true"
+              role="status"
+              aria-label="경로 불러오는 중"
+            >
+              <div className="map-loading-spinner" aria-hidden="true" />
               <div className="map-loading-label">경로 불러오는 중…</div>
             </div>
           )}

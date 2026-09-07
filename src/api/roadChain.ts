@@ -28,6 +28,8 @@ function flipGaps(gaps: RouteGapInfo[] | undefined): RouteGapInfo[] | undefined 
       ...g,
       from: g.to,
       to: g.from,
+      // Segment indices are invalid after reverse; insert uses haversine on from
+      afterSegmentIndex: undefined,
     }))
     .reverse()
 }

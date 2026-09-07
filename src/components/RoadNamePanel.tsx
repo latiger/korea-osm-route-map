@@ -53,30 +53,65 @@ function sameStraightConnector(line: LatLng[], from: LatLng, to: LatLng): boolea
   )
 }
 
+function haversineMeters(a: LatLng, b: LatLng): number {
+  const R = 6371000
+  const toRad = (d: number) => (d * Math.PI) / 180
+  const dLat = toRad(b.lat - a.lat)
+  const dLng = toRad(b.lng - a.lng)
+  const lat1 = toRad(a.lat)
+  const lat2 = toRad(b.lat)
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+/** Splice index for connector steps: after the gap, not at end of the list. */
+function insertIndexForGap(baseSteps: RouteStep[], gap: RouteGapInfo): number {
+  let bestIdx = -1
+  let bestDist = Infinity
+  for (let i = 0; i < baseSteps.length; i++) {
+    const loc = baseSteps[i].location
+    if (!loc) continue
+    const d = haversineMeters(loc, gap.from)
+    if (d < bestDist) {
+      bestDist = d
+      bestIdx = i
+    }
+  }
+  if (bestIdx >= 0) {
+    // Insert after the step nearest to the gap start
+    return bestIdx + 1
+  }
+  if (gap.afterSegmentIndex != null) {
+    // Fallback when official step locations are missing / sparse
+    return Math.min(gap.afterSegmentIndex + 1, baseSteps.length)
+  }
+  // No locations and no segment hint — only then append
+  return baseSteps.length
+}
 
 /**
- * Append connector turn-by-turn steps under a section header.
- * Layout (header + maneuvers) is meant for reuse by future 네비게이션.
+ * Insert connector turn-by-turn maneuvers at the gap's place in the path
+ * (not blindly appended at the end). No section header — list shows only
+ * the connector's navigation steps (depart/arrive dropped).
  */
 function appendConnectorSteps(
   baseSteps: RouteStep[],
   conn: RouteResult,
   gap: RouteGapInfo,
 ): RouteStep[] {
-  const header: RouteStep = {
-    type: 'connect',
-    label: '이어서 연결',
-    name: gap.label || '연결 구간',
-    distanceMeters: conn.distanceMeters,
-    durationSeconds: conn.durationSeconds,
-    location: gap.from,
-  }
-  // Drop redundant connector depart/arrive when nesting under the header
   const maneuvers = (conn.steps ?? []).filter((s) => {
     const t = (s.type ?? '').toLowerCase()
     return t !== 'depart' && t !== 'arrive'
   })
-  return [...baseSteps, header, ...maneuvers]
+  if (!maneuvers.length) return baseSteps
+  const insertAt = insertIndexForGap(baseSteps, gap)
+  return [
+    ...baseSteps.slice(0, insertAt),
+    ...maneuvers,
+    ...baseSteps.slice(insertAt),
+  ]
 }
 
 interface Props {
@@ -373,7 +408,14 @@ export function RoadNamePanel({
     if (!route?.gaps?.length) return
     const targets = [...route.gaps]
       .filter((g) => g.kind === 'skipped' || g.kind === 'straight')
-      .sort((a, b) => a.gapMeters - b.gapMeters)
+      .sort((a, b) => {
+        const ai = a.afterSegmentIndex
+        const bi = b.afterSegmentIndex
+        if (ai != null && bi != null && ai !== bi) return ai - bi
+        if (ai != null && bi == null) return -1
+        if (ai == null && bi != null) return 1
+        return a.gapMeters - b.gapMeters
+      })
       .slice(0, 10)
     if (!targets.length) return
 

@@ -235,6 +235,7 @@ function makeGapInfo(
   kind: GapBridgeKind,
   labelPrefix = '내부 끊김',
 ): RouteGapInfo {
+  // `index` is the next segment (ordered[i]); gap is after ordered[i-1]
   return {
     id: `gap-${index}`,
     label: labelPrefix,
@@ -242,6 +243,7 @@ function makeGapInfo(
     to: b,
     gapMeters,
     kind,
+    afterSegmentIndex: index - 1,
   }
 }
 

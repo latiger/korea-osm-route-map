@@ -101,4 +101,9 @@ export interface RouteGapInfo {
   to: LatLng
   gapMeters: number
   kind: GapBridgeKind // routed=길찾기연결, straight=직선점선, skipped=미연결(>5km 등)
+  /**
+   * Index of the ordered official segment that ends at `from`
+   * (gap lies between ordered[afterSegmentIndex] and ordered[afterSegmentIndex+1]).
+   */
+  afterSegmentIndex?: number
 }

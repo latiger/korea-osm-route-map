@@ -298,6 +298,24 @@ button.danger-outline:hover:not(:disabled) {
 }
 
 
+.route-step-num {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #334155;
+  color: #e2e8f0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  margin-top: 2px;
+}
+
 .route-step-symbol {
   flex-shrink: 0;
   width: 1.5rem;
@@ -428,6 +446,38 @@ button.danger-outline:hover:not(:disabled) {
   background: #64748b;
   color: #fff;
   font-size: 12px;
+}
+
+.step-marker-icon {
+  background: transparent;
+  border: 0;
+}
+
+.step-map-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #0ea5e9;
+  color: #fff;
+  font-weight: 700;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  border: 1.5px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  font-family: 'Pretendard', 'Noto Sans KR', system-ui, sans-serif;
+  pointer-events: none;
+}
+
+.step-map-badge.compact {
+  width: 18px;
+  height: 18px;
+  font-size: 9px;
+  border-width: 1px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 /* Legacy class kept for any residual references */

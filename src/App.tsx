@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { reverseGeocodeKorea } from './api/geocode'
 import { MapCanvas } from './components/MapCanvas'
 import { ModeTabs } from './components/ModeTabs'
@@ -86,6 +86,33 @@ function App() {
     }
   }
 
+  const stepMarkers = useMemo(() => {
+    const steps = route?.steps
+    if (!steps?.length) return []
+
+    const withLoc = steps
+      .map((s, i) => ({ s, n: i + 1 }))
+      .filter(({ s }) => s.location != null)
+
+    const selected =
+      withLoc.length > 60
+        ? withLoc.filter(
+            ({ s }) =>
+              s.distanceMeters > 0 ||
+              s.type === 'connect' ||
+              s.type === 'depart' ||
+              s.type === 'arrive',
+          )
+        : withLoc
+
+    return selected.map(({ s, n }) => ({
+      n,
+      lat: s.location!.lat,
+      lng: s.location!.lng,
+      label: s.label,
+    }))
+  }, [route?.steps])
+
   return (
     <div className="app">
       <header className="app-header">
@@ -139,6 +166,7 @@ function App() {
             }}
             focus={focusLocation}
             fitRevision={fitRevision}
+            stepMarkers={stepMarkers}
           />
           {placing && (
             <div className="place-status" aria-live="polite">

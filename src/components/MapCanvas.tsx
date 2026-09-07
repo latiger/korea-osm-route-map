@@ -56,6 +56,17 @@ function badgeIcon(role: MarkerRole, label: string) {
   })
 }
 
+function stepBadgeIcon(n: number, compact: boolean) {
+  const size = compact ? 18 : 22
+  const cls = compact ? 'step-map-badge compact' : 'step-map-badge'
+  return L.divIcon({
+    className: 'marker-icon step-marker-icon',
+    html: `<div class="${cls}">${n}</div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  })
+}
+
 function markerIconForKey(key: string, index: number) {
   const role = roleFromKey(key)
   if (role === 'start') return badgeIcon('start', '출발')
@@ -277,6 +288,8 @@ export interface MapCanvasProps {
   focus?: LatLng | null
   /** Bump to re-run FitBounds (restore full-route view) */
   fitRevision?: number
+  /** Numbered route-step markers matching RouteSummary list indices */
+  stepMarkers?: Array<{ n: number; lat: number; lng: number; label?: string }>
 }
 
 export function MapCanvas({
@@ -291,6 +304,7 @@ export function MapCanvas({
   onMapPlace,
   focus = null,
   fitRevision = 0,
+  stepMarkers = [],
 }: MapCanvasProps) {
   const [highlight, setHighlight] = useState<LatLng | null>(null)
 
@@ -347,6 +361,17 @@ export function MapCanvas({
           position={[m.lat, m.lng]}
           title={m.label}
           icon={markerIconForKey(m.key, i)}
+          zIndexOffset={600}
+        />
+      ))}
+      {stepMarkers.map((s) => (
+        <Marker
+          key={`step-${s.n}-${s.lat}-${s.lng}`}
+          position={[s.lat, s.lng]}
+          title={s.label ? `${s.n}. ${s.label}` : String(s.n)}
+          icon={stepBadgeIcon(s.n, stepMarkers.length > 40)}
+          zIndexOffset={500}
+          interactive={false}
         />
       ))}
       {highlight && (

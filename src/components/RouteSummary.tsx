@@ -73,6 +73,9 @@ export function RouteSummary({ route, onStepClick }: Props) {
 
             const body = (
               <>
+                <span className="route-step-num" aria-hidden>
+                  {i + 1}
+                </span>
                 <span className="route-step-symbol" aria-hidden>
                   {symbol}
                 </span>
